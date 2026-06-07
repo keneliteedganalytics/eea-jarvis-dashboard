@@ -28,6 +28,8 @@ export function useLiveEvents() {
               `Race ${event.raceNumber ?? event.raceId} recap`,
             );
           }
+        } else if (event.type === "tuning_proposals") {
+          queryClient.invalidateQueries({ queryKey: ["/api/tuning-proposals"] });
         }
       } catch {
         /* ignore malformed */

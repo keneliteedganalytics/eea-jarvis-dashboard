@@ -10,8 +10,9 @@ import { tierOf } from "@/lib/tiers";
 import { useJarvis } from "@/lib/jarvis";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Mic, Play, Lock, Check, Upload, Flag, RefreshCw } from "lucide-react";
+import { Mic, Play, Lock, Check, Flag, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { UploadCard } from "@/components/UploadCard";
 
 function StatBox({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
   return (
@@ -253,16 +254,7 @@ export default function Home() {
             ))}
           </div>
         </div>
-        <div
-          className="rounded-lg border border-dashed border-gold/25 bg-navy-section/50 p-4 flex flex-col items-center justify-center text-center"
-          data-testid="dropzone-pps"
-        >
-          <Upload className="h-5 w-5 text-gold-dark mb-2" />
-          <div className="text-xs text-silver font-display font-bold">
-            Drop Equibase / Quant-Capper / Brisnet PDFs
-          </div>
-          <div className="mt-1 text-[10px] text-muted-brand">PDF parsing coming in v2</div>
-        </div>
+        <UploadCard />
       </div>
 
       {/* Race rows */}

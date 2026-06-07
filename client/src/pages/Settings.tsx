@@ -12,7 +12,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Mic, Save } from "lucide-react";
+import { Mic, Save, Check, X } from "lucide-react";
+import type { TuningProposal } from "@shared/schema";
 
 const PREMADE_VOICES = [
   { id: "onwK4e9ZLuTAKqWW03F9", name: "Daniel", desc: "Steady Broadcaster (British)" },
@@ -43,6 +44,51 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <label className="text-[10px] uppercase tracking-[0.16em] text-gold-dark font-display font-bold">{label}</label>
       {children}
     </div>
+  );
+}
+
+function TuningInbox() {
+  const { toast } = useToast();
+  const { data: proposals } = useQuery<TuningProposal[]>({ queryKey: ["/api/tuning-proposals"] });
+
+  const act = useMutation({
+    mutationFn: async ({ id, action }: { id: number; action: "accept" | "reject" }) => {
+      await apiRequest("POST", `/api/tuning-proposals/${id}/${action}`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tuning-proposals"] });
+      toast({ title: "Proposal updated" });
+    },
+    onError: (e) => toast({ title: "Action failed", description: (e as Error).message, variant: "destructive" }),
+  });
+
+  if (!proposals || proposals.length === 0) {
+    return (
+      <Section title="Auto-Tuner Proposals" desc="Surfaces when the engine drifts from its baselines">
+        <div className="text-xs text-muted-brand">No pending proposals — the engine is tracking to plan.</div>
+      </Section>
+    );
+  }
+
+  return (
+    <Section title={`Auto-Tuner Proposals (${proposals.length})`} desc="Review evidence, then accept or reject">
+      <div className="space-y-3">
+        {proposals.map((p) => (
+          <div key={p.id} className="rounded-md border border-gold/15 bg-navy-section p-3" data-testid={`proposal-${p.id}`}>
+            <div className="text-[12px] text-silver">{p.hypothesis}</div>
+            <pre className="mt-1.5 overflow-x-auto rounded bg-navy-bg/60 p-2 text-[10px] text-muted-brand">{p.evidenceJson}</pre>
+            <div className="mt-2 flex gap-2">
+              <Button size="sm" onClick={() => act.mutate({ id: p.id, action: "accept" })} disabled={act.isPending} className="bg-win/80 hover:bg-win text-navy-bg" data-testid={`button-accept-${p.id}`}>
+                <Check className="h-3.5 w-3.5 mr-1" /> Accept
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => act.mutate({ id: p.id, action: "reject" })} disabled={act.isPending} className="border-loss/40 text-loss hover:bg-loss/10" data-testid={`button-reject-${p.id}`}>
+                <X className="h-3.5 w-3.5 mr-1" /> Reject
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Section>
   );
 }
 
@@ -116,6 +162,51 @@ export default function Settings() {
             </Field>
           </div>
         </Section>
+
+        {/* LLM provider + keys */}
+        <Section title="LLM Handicapping Engine" desc="API keys live server-side; leave blank to use the server's .env">
+          <Field label="Default Provider">
+            <Select value={form.defaultLlmProvider} onValueChange={(v) => set("defaultLlmProvider", v)}>
+              <SelectTrigger className="bg-navy-section border-gold/15 text-silver" data-testid="select-llm-provider"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="anthropic">Anthropic</SelectItem>
+                <SelectItem value="poe">Poe</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Field label="Anthropic Model">
+              <Input value={form.defaultAnthropicModel ?? ""} onChange={(e) => set("defaultAnthropicModel", e.target.value)} className="bg-navy-section border-gold/15 text-silver" data-testid="input-anthropic-model" />
+            </Field>
+            <Field label="Poe Model">
+              <Input value={form.defaultPoeModel ?? ""} onChange={(e) => set("defaultPoeModel", e.target.value)} className="bg-navy-section border-gold/15 text-silver" data-testid="input-poe-model" />
+            </Field>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Field label="Anthropic API Key">
+              <Input type="password" value={form.anthropicApiKey ?? ""} placeholder="sk-ant-… (or set in .env)" onChange={(e) => set("anthropicApiKey", e.target.value)} className="bg-navy-section border-gold/15 text-silver" data-testid="input-anthropic-key" />
+            </Field>
+            <Field label="Poe API Key">
+              <Input type="password" value={form.poeApiKey ?? ""} placeholder="sk-poe-… (or set in .env)" onChange={(e) => set("poeApiKey", e.target.value)} className="bg-navy-section border-gold/15 text-silver" data-testid="input-poe-key" />
+            </Field>
+          </div>
+        </Section>
+
+        {/* Risk cap + tier shares */}
+        <Section title="Risk &amp; Tier Sizing" desc="Daily risk cap as % of bankroll; tier shares slice that cap">
+          <div className="grid sm:grid-cols-3 gap-4">
+            <Field label="Daily Risk Cap (%)">
+              <Input type="number" step="0.01" value={form.dailyRiskCapPct ?? 0} onChange={(e) => set("dailyRiskCapPct", parseFloat(e.target.value) || 0)} className="bg-navy-section border-gold/15 text-silver tabular-nums" data-testid="input-risk-cap" />
+            </Field>
+            <Field label="Sniper Share"><Input type="number" step="0.01" value={form.tierShareSniper ?? 0} onChange={(e) => set("tierShareSniper", parseFloat(e.target.value) || 0)} className="bg-navy-section border-gold/15 text-silver tabular-nums" data-testid="input-share-sniper" /></Field>
+            <Field label="Edge Share"><Input type="number" step="0.01" value={form.tierShareEdge ?? 0} onChange={(e) => set("tierShareEdge", parseFloat(e.target.value) || 0)} className="bg-navy-section border-gold/15 text-silver tabular-nums" data-testid="input-share-edge" /></Field>
+            <Field label="Dual Share"><Input type="number" step="0.01" value={form.tierShareDual ?? 0} onChange={(e) => set("tierShareDual", parseFloat(e.target.value) || 0)} className="bg-navy-section border-gold/15 text-silver tabular-nums" data-testid="input-share-dual" /></Field>
+            <Field label="Recon Share"><Input type="number" step="0.01" value={form.tierShareRecon ?? 0} onChange={(e) => set("tierShareRecon", parseFloat(e.target.value) || 0)} className="bg-navy-section border-gold/15 text-silver tabular-nums" data-testid="input-share-recon" /></Field>
+          </div>
+        </Section>
+
+        {/* Auto-tuner proposals */}
+        <TuningInbox />
 
         {/* Wager amounts per tier */}
         <Section title="Wager Amounts by Tier">

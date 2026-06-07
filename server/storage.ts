@@ -4,6 +4,13 @@ import {
   results,
   settings,
   audioCache,
+  ppUploads,
+  predictions,
+  predictionOutcomes,
+  formulaVersions,
+  tuningProposals,
+  biasReads,
+  maidenEnrichment,
 } from "@shared/schema";
 import type {
   Card,
@@ -15,10 +22,25 @@ import type {
   InsertRace,
   RaceWithResult,
   CardWithRaces,
+  PpUpload,
+  InsertPpUpload,
+  Prediction,
+  InsertPrediction,
+  PredictionOutcome,
+  InsertPredictionOutcome,
+  FormulaVersion,
+  InsertFormulaVersion,
+  TuningProposal,
+  InsertTuningProposal,
+  BiasRead,
+  InsertBiasRead,
+  MaidenEnrichment,
+  InsertMaidenEnrichment,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { gradeRace, gradeFlags } from "./grading";
+import { DEFAULT_WEIGHTS, PERSONA_V1 } from "./services/eea-config";
 
 export interface IStorage {
   // Cards
@@ -28,12 +50,14 @@ export interface IStorage {
   getCardWithRaces(id: number): CardWithRaces | undefined;
   createCard(card: InsertCard, raceRows: Omit<InsertRace, "cardId">[]): CardWithRaces;
   updateCard(id: number, patch: Partial<Card>): Card | undefined;
+  deleteCard(id: number): void;
   getLockedCards(): Card[];
 
   // Races
   getRace(id: number): Race | undefined;
   getRacesByCard(cardId: number): Race[];
   updateRaceText(id: number, whyText?: string, paceText?: string): Race | undefined;
+  updateRaceFusion(id: number, patch: Partial<Race>): Race | undefined;
 
   // Results
   getResultByRace(raceId: number): Result | undefined;
@@ -46,6 +70,43 @@ export interface IStorage {
   // Audio cache
   getAudio(scriptHash: string): AudioCache | undefined;
   insertAudio(row: Omit<AudioCache, "id" | "createdAt">): AudioCache;
+
+  // ── EEA v1 ────────────────────────────────────────────────────────────────
+  // PP uploads
+  createPpUpload(row: InsertPpUpload): PpUpload;
+  updatePpUpload(id: number, patch: Partial<PpUpload>): PpUpload | undefined;
+  getPpUploadsByCard(cardId: number): PpUpload[];
+
+  // Predictions
+  createPrediction(row: InsertPrediction): Prediction;
+  updatePrediction(id: number, patch: Partial<Prediction>): Prediction | undefined;
+  getPrediction(id: number): Prediction | undefined;
+  getPredictionsByRace(raceId: number): Prediction[];
+  getPredictionsByCard(cardId: number): Prediction[];
+  deletePredictionsByCard(cardId: number): void;
+
+  // Prediction outcomes
+  upsertPredictionOutcome(row: InsertPredictionOutcome): PredictionOutcome;
+  getOutcomeByPrediction(predictionId: number): PredictionOutcome | undefined;
+  getAllPredictionsWithOutcomes(): { prediction: Prediction; outcome: PredictionOutcome | null }[];
+
+  // Formula versions
+  getActiveFormulaVersion(): FormulaVersion | undefined;
+  createFormulaVersion(row: InsertFormulaVersion): FormulaVersion;
+  activateFormulaVersion(weightsJson: string, personaText: string, notes?: string): FormulaVersion;
+
+  // Tuning proposals
+  createTuningProposal(row: InsertTuningProposal): TuningProposal;
+  getPendingProposals(): TuningProposal[];
+  updateProposalStatus(id: number, status: "accepted" | "rejected"): TuningProposal | undefined;
+
+  // Bias reads
+  upsertBiasRead(row: InsertBiasRead): BiasRead;
+  getBiasRead(track: string, date: string): BiasRead | undefined;
+
+  // Maiden enrichment
+  upsertMaidenEnrichment(row: InsertMaidenEnrichment): MaidenEnrichment;
+  getMaidenEnrichment(raceId: number, horsePgm: string): MaidenEnrichment | undefined;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -101,6 +162,12 @@ export class DatabaseStorage implements IStorage {
     return this.getCard(id);
   }
 
+  deleteCard(id: number): void {
+    db.delete(ppUploads).where(eq(ppUploads.cardId, id)).run();
+    db.delete(races).where(eq(races.cardId, id)).run();
+    db.delete(cards).where(eq(cards.id, id)).run();
+  }
+
   getLockedCards(): Card[] {
     return db.select().from(cards).where(eq(cards.locked, true)).all();
   }
@@ -118,6 +185,12 @@ export class DatabaseStorage implements IStorage {
     const patch: Partial<Race> = {};
     if (whyText !== undefined) patch.whyText = whyText;
     if (paceText !== undefined) patch.paceText = paceText;
+    db.update(races).set(patch).where(eq(races.id, id)).run();
+    return this.getRace(id);
+  }
+
+  // Apply fused/LLM results to a race row (tier, read, flattened picks).
+  updateRaceFusion(id: number, patch: Partial<Race>): Race | undefined {
     db.update(races).set(patch).where(eq(races.id, id)).run();
     return this.getRace(id);
   }
@@ -191,9 +264,192 @@ export class DatabaseStorage implements IStorage {
   insertAudio(row: Omit<AudioCache, "id" | "createdAt">): AudioCache {
     return db.insert(audioCache).values(row).returning().get();
   }
+
+  // ── EEA v1: PP uploads ────────────────────────────────────────────────────
+  createPpUpload(row: InsertPpUpload): PpUpload {
+    return db.insert(ppUploads).values(row).returning().get();
+  }
+
+  updatePpUpload(id: number, patch: Partial<PpUpload>): PpUpload | undefined {
+    db.update(ppUploads).set(patch).where(eq(ppUploads.id, id)).run();
+    return db.select().from(ppUploads).where(eq(ppUploads.id, id)).get();
+  }
+
+  getPpUploadsByCard(cardId: number): PpUpload[] {
+    return db.select().from(ppUploads).where(eq(ppUploads.cardId, cardId)).all();
+  }
+
+  // ── EEA v1: predictions ───────────────────────────────────────────────────
+  createPrediction(row: InsertPrediction): Prediction {
+    return db.insert(predictions).values(row).returning().get();
+  }
+
+  updatePrediction(id: number, patch: Partial<Prediction>): Prediction | undefined {
+    db.update(predictions).set(patch).where(eq(predictions.id, id)).run();
+    return this.getPrediction(id);
+  }
+
+  getPrediction(id: number): Prediction | undefined {
+    return db.select().from(predictions).where(eq(predictions.id, id)).get();
+  }
+
+  getPredictionsByRace(raceId: number): Prediction[] {
+    return db
+      .select()
+      .from(predictions)
+      .where(eq(predictions.raceId, raceId))
+      .all()
+      .sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
+  }
+
+  getPredictionsByCard(cardId: number): Prediction[] {
+    const raceRows = db.select().from(races).where(eq(races.cardId, cardId)).all();
+    const ids = new Set(raceRows.map((r) => r.id));
+    return db
+      .select()
+      .from(predictions)
+      .all()
+      .filter((p) => ids.has(p.raceId));
+  }
+
+  deletePredictionsByCard(cardId: number): void {
+    const raceRows = db.select().from(races).where(eq(races.cardId, cardId)).all();
+    for (const r of raceRows) {
+      db.delete(predictions).where(eq(predictions.raceId, r.id)).run();
+    }
+  }
+
+  // ── EEA v1: prediction outcomes ───────────────────────────────────────────
+  upsertPredictionOutcome(row: InsertPredictionOutcome): PredictionOutcome {
+    db.delete(predictionOutcomes)
+      .where(eq(predictionOutcomes.predictionId, row.predictionId))
+      .run();
+    return db.insert(predictionOutcomes).values(row).returning().get();
+  }
+
+  getOutcomeByPrediction(predictionId: number): PredictionOutcome | undefined {
+    return db
+      .select()
+      .from(predictionOutcomes)
+      .where(eq(predictionOutcomes.predictionId, predictionId))
+      .get();
+  }
+
+  getAllPredictionsWithOutcomes(): { prediction: Prediction; outcome: PredictionOutcome | null }[] {
+    const preds = db.select().from(predictions).all();
+    return preds.map((p) => ({
+      prediction: p,
+      outcome: this.getOutcomeByPrediction(p.id) ?? null,
+    }));
+  }
+
+  // ── EEA v1: formula versions ──────────────────────────────────────────────
+  getActiveFormulaVersion(): FormulaVersion | undefined {
+    return db
+      .select()
+      .from(formulaVersions)
+      .where(isNull(formulaVersions.deactivatedAt))
+      .all()
+      .sort((a, b) => b.id - a.id)[0];
+  }
+
+  createFormulaVersion(row: InsertFormulaVersion): FormulaVersion {
+    return db.insert(formulaVersions).values(row).returning().get();
+  }
+
+  activateFormulaVersion(weightsJson: string, personaText: string, notes?: string): FormulaVersion {
+    const now = new Date();
+    // Deactivate the current active version.
+    db.update(formulaVersions)
+      .set({ deactivatedAt: now })
+      .where(isNull(formulaVersions.deactivatedAt))
+      .run();
+    return db
+      .insert(formulaVersions)
+      .values({ weightsJson, personaText, activatedAt: now, notes: notes ?? null })
+      .returning()
+      .get();
+  }
+
+  // ── EEA v1: tuning proposals ──────────────────────────────────────────────
+  createTuningProposal(row: InsertTuningProposal): TuningProposal {
+    return db.insert(tuningProposals).values(row).returning().get();
+  }
+
+  getPendingProposals(): TuningProposal[] {
+    return db
+      .select()
+      .from(tuningProposals)
+      .where(eq(tuningProposals.status, "pending"))
+      .all();
+  }
+
+  updateProposalStatus(id: number, status: "accepted" | "rejected"): TuningProposal | undefined {
+    db.update(tuningProposals)
+      .set({ status, reviewedAt: new Date() })
+      .where(eq(tuningProposals.id, id))
+      .run();
+    return db.select().from(tuningProposals).where(eq(tuningProposals.id, id)).get();
+  }
+
+  // ── EEA v1: bias reads ────────────────────────────────────────────────────
+  upsertBiasRead(row: InsertBiasRead): BiasRead {
+    db.delete(biasReads)
+      .where(and(eq(biasReads.track, row.track), eq(biasReads.date, row.date)))
+      .run();
+    return db.insert(biasReads).values(row).returning().get();
+  }
+
+  getBiasRead(track: string, date: string): BiasRead | undefined {
+    return db
+      .select()
+      .from(biasReads)
+      .where(and(eq(biasReads.track, track), eq(biasReads.date, date)))
+      .get();
+  }
+
+  // ── EEA v1: maiden enrichment ─────────────────────────────────────────────
+  upsertMaidenEnrichment(row: InsertMaidenEnrichment): MaidenEnrichment {
+    db.delete(maidenEnrichment)
+      .where(
+        and(
+          eq(maidenEnrichment.raceId, row.raceId),
+          eq(maidenEnrichment.horsePgm, row.horsePgm),
+        ),
+      )
+      .run();
+    return db.insert(maidenEnrichment).values(row).returning().get();
+  }
+
+  getMaidenEnrichment(raceId: number, horsePgm: string): MaidenEnrichment | undefined {
+    return db
+      .select()
+      .from(maidenEnrichment)
+      .where(
+        and(
+          eq(maidenEnrichment.raceId, raceId),
+          eq(maidenEnrichment.horsePgm, horsePgm),
+        ),
+      )
+      .get();
+  }
 }
 
 export const storage = new DatabaseStorage();
+
+// Seed the v1 persona + default weights into formula_versions on first boot.
+export function seedFormulaVersion(): void {
+  const active = storage.getActiveFormulaVersion();
+  if (active) return;
+  storage.createFormulaVersion({
+    weightsJson: JSON.stringify(DEFAULT_WEIGHTS),
+    personaText: PERSONA_V1,
+    activatedAt: new Date(),
+    deactivatedAt: null,
+    notes: "Persona v1 (seed)",
+  });
+  console.log("[seed] formula_versions seeded with persona v1 + default weights");
+}
 
 // ── Seed: Saratoga June 7 2026 card + R1 result ───────────────────────────
 type SeedRace = {
