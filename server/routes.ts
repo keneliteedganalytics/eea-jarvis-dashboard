@@ -20,7 +20,7 @@ import {
 } from "./services/scripts";
 import { generateSpeech, getCachedFilePath, fetchVoices } from "./services/tts";
 import { addSseClient, removeSseClient } from "./services/events";
-import { startPoller } from "./services/poller";
+import { startPoller, runPollerNow } from "./services/poller";
 
 // Helper: load TTS settings (voice / model / speed) from storage.
 function ttsSettings(): { voiceId: string; modelId: string; speed: number } {
@@ -113,6 +113,18 @@ export async function registerRoutes(
     );
     if (!updated) return res.status(404).json({ error: "Race not found" });
     res.json(updated);
+  });
+
+  // ── Poller ───────────────────────────────────────────────────────────────
+  // Force-run the auto-fetcher across all cards, ignoring lock + post-time.
+  // Useful for backfilling already-final races without waiting 5 minutes.
+  app.post("/api/poller/run-now", async (_req, res) => {
+    try {
+      const summary = await runPollerNow();
+      res.json({ ok: true, ...summary });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
   });
 
   // ── Settings ─────────────────────────────────────────────────────────────
