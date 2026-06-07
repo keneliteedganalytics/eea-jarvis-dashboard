@@ -1,0 +1,211 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Elite Edge Analytics — dark-only brand theme.
+   :root and .dark are IDENTICAL — this app is dark-only. */
+:root,
+.dark {
+  --button-outline: rgba(201, 162, 39, 0.18);
+  --badge-outline: rgba(201, 162, 39, 0.12);
+  --opaque-button-border-intensity: 9;
+  --elevate-1: rgba(232, 193, 74, 0.05);
+  --elevate-2: rgba(232, 193, 74, 0.1);
+
+  /* Brand palette (H S% L%) */
+  --navy-bg: 214 78% 4%; /* #020810 */
+  --navy-card: 217 70% 7%; /* #060E1C */
+  --navy-section: 216 60% 10%; /* #0A1628 */
+  --navy-raised: 219 60% 15%; /* #0F1F3D */
+  --gold: 44 70% 47%; /* #C9A227 */
+  --gold-light: 45 78% 60%; /* #E8C14A */
+  --gold-dark: 44 68% 36%; /* #9A7B1E */
+  --silver: 207 39% 90%; /* #DCE8F0 */
+  --slate-brand: 220 17% 51%; /* #6B7A99 */
+  --muted-brand: 216 11% 58%; /* #8892A0 */
+  --dim: 217 19% 27%; /* #374151 */
+  --win: 142 69% 58%; /* #4ADE80 */
+  --loss: 0 84% 60%; /* #EF4444 */
+
+  /* Semantic mapping for shadcn primitives */
+  --background: 214 78% 4%;
+  --foreground: 207 39% 90%;
+  --border: 44 70% 47% / 0.12;
+  --card: 217 70% 7%;
+  --card-foreground: 207 39% 90%;
+  --card-border: 44 70% 47% / 0.12;
+  --sidebar: 217 70% 7%;
+  --sidebar-foreground: 207 39% 90%;
+  --sidebar-border: 44 70% 47% / 0.14;
+  --sidebar-primary: 44 70% 47%;
+  --sidebar-primary-foreground: 214 78% 4%;
+  --sidebar-accent: 219 60% 15%;
+  --sidebar-accent-foreground: 207 39% 90%;
+  --sidebar-ring: 44 70% 47%;
+  --popover: 219 60% 15%;
+  --popover-foreground: 207 39% 90%;
+  --popover-border: 44 70% 47% / 0.2;
+  --primary: 44 70% 47%;
+  --primary-foreground: 214 78% 4%;
+  --secondary: 216 60% 10%;
+  --secondary-foreground: 207 39% 90%;
+  --muted: 216 60% 10%;
+  --muted-foreground: 216 11% 58%;
+  --accent: 219 60% 15%;
+  --accent-foreground: 45 78% 60%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 207 39% 90%;
+  --input: 219 50% 18%;
+  --ring: 44 70% 47%;
+
+  --chart-1: 45 78% 60%; /* gold-light */
+  --chart-2: 44 70% 47%; /* gold */
+  --chart-3: 142 69% 58%; /* win */
+  --chart-4: 220 17% 51%; /* slate */
+  --chart-5: 0 84% 60%; /* loss */
+
+  --font-sans: "DM Sans", "Inter", sans-serif;
+  --font-serif: "DM Sans", serif;
+  --font-mono: "DM Sans", monospace;
+  --radius: 0.5rem;
+
+  --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 0% / 0);
+  --shadow-xs: 0px 2px 0px 0px hsl(0 0% 0% / 0);
+  --shadow-sm: 0px 2px 4px -1px hsl(214 78% 1% / 0.5);
+  --shadow: 0px 2px 6px -1px hsl(214 78% 1% / 0.5);
+  --shadow-md: 0px 4px 10px -2px hsl(214 78% 1% / 0.55);
+  --shadow-lg: 0px 8px 20px -4px hsl(214 78% 1% / 0.6);
+  --shadow-xl: 0px 14px 30px -6px hsl(214 78% 1% / 0.65);
+  --shadow-2xl: 0px 24px 48px -10px hsl(214 78% 1% / 0.7);
+  --tracking-normal: 0em;
+  --spacing: 0.25rem;
+
+  --sidebar-primary-border: hsl(var(--sidebar-primary));
+  --sidebar-accent-border: hsl(var(--sidebar-accent));
+  --primary-border: hsl(var(--primary));
+  --secondary-border: hsl(var(--secondary));
+  --muted-border: hsl(var(--muted));
+  --accent-border: hsl(var(--accent));
+  --destructive-border: hsl(var(--destructive));
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased;
+    background-color: hsl(var(--navy-bg));
+    color: hsl(var(--silver));
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -10%, hsl(44 70% 47% / 0.06), transparent),
+      radial-gradient(ellipse 60% 40% at 100% 0%, hsl(219 60% 15% / 0.4), transparent);
+    background-attachment: fixed;
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  input[type='search']::-webkit-search-cancel-button {
+    @apply hidden;
+  }
+
+  [contenteditable][data-placeholder]:empty::before {
+    content: attr(data-placeholder);
+    color: hsl(var(--muted-foreground));
+    pointer-events: none;
+  }
+
+  .no-default-hover-elevate {
+  }
+  .no-default-active-elevate {
+  }
+
+  .toggle-elevate::before,
+  .toggle-elevate-2::before {
+    content: '';
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    border-radius: inherit;
+    z-index: -1;
+  }
+
+  .toggle-elevate.toggle-elevated::before {
+    background-color: var(--elevate-2);
+  }
+
+  .border.toggle-elevate::before {
+    inset: -1px;
+  }
+
+  .hover-elevate:not(.no-default-hover-elevate),
+  .active-elevate:not(.no-default-active-elevate),
+  .hover-elevate-2:not(.no-default-hover-elevate),
+  .active-elevate-2:not(.no-default-active-elevate) {
+    position: relative;
+    z-index: 0;
+  }
+
+  .hover-elevate:not(.no-default-hover-elevate)::after,
+  .active-elevate:not(.no-default-active-elevate)::after,
+  .hover-elevate-2:not(.no-default-hover-elevate)::after,
+  .active-elevate-2:not(.no-default-active-elevate)::after {
+    content: '';
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    border-radius: inherit;
+    z-index: 999;
+  }
+
+  .hover-elevate:hover:not(.no-default-hover-elevate)::after,
+  .active-elevate:active:not(.no-default-active-elevate)::after {
+    background-color: var(--elevate-1);
+  }
+
+  .hover-elevate-2:hover:not(.no-default-hover-elevate)::after,
+  .active-elevate-2:active:not(.no-default-active-elevate)::after {
+    background-color: var(--elevate-2);
+  }
+
+  .border.hover-elevate:not(.no-hover-interaction-elevate)::after,
+  .border.active-elevate:not(.no-active-interaction-elevate)::after,
+  .border.hover-elevate-2:not(.no-hover-interaction-elevate)::after,
+  .border.active-elevate-2:not(.no-active-interaction-elevate)::after,
+  .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
+    inset: -1px;
+  }
+
+  /* Jarvis waveform bars */
+  @keyframes wave-bounce {
+    0%, 100% { transform: scaleY(0.25); }
+    50% { transform: scaleY(1); }
+  }
+  .wave-bar {
+    transform-origin: center bottom;
+  }
+  .wave-bar.playing {
+    animation: wave-bounce 0.9s ease-in-out infinite;
+  }
+
+  @keyframes scope-pulse {
+    0%, 100% { opacity: 1; filter: drop-shadow(0 0 2px hsl(44 70% 47% / 0.4)); }
+    50% { opacity: 0.55; filter: drop-shadow(0 0 8px hsl(45 78% 60% / 0.7)); }
+  }
+  .scope-pulse {
+    animation: scope-pulse 1.6s ease-in-out infinite;
+  }
+
+  .gold-gradient-text {
+    background: linear-gradient(90deg, hsl(44 68% 36%), hsl(44 70% 47%), hsl(45 78% 60%));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+}

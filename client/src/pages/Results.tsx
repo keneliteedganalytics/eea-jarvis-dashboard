@@ -1,0 +1,209 @@
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { useState } from "react";
+import type { CardWithRaces, RaceWithResult, Settings } from "@shared/schema";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { TierPill } from "@/components/brand/TierPill";
+import { useJarvis } from "@/lib/jarvis";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
+import { Volume2, Mic, Check, X } from "lucide-react";
+
+function pct(n: number, d: number): string {
+  if (d === 0) return "—";
+  return `${Math.round((n / d) * 100)}%`;
+}
+
+function StatChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-gold/10 bg-navy-card px-3 py-2 text-center">
+      <div className="text-lg font-display font-black text-gold-light tabular-nums">{value}</div>
+      <div className="text-[9px] uppercase tracking-[0.14em] text-muted-brand mt-0.5">{label}</div>
+    </div>
+  );
+}
+
+function ResultEntry({ race, autoRecap }: { race: RaceWithResult; autoRecap: boolean }) {
+  const [value, setValue] = useState("");
+  const { toast } = useToast();
+  const jarvis = useJarvis();
+
+  const submit = useMutation({
+    mutationFn: async () => {
+      const finishOrder = value.split(/[-\s,]+/).map((s) => s.trim()).filter(Boolean);
+      if (finishOrder.length < 2) throw new Error("Enter at least 2 program numbers, e.g. 5-3-1-7");
+      await apiRequest("POST", `/api/races/${race.id}/result`, { finishOrder });
+      return finishOrder;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] });
+      toast({ title: `Race ${race.raceNumber} graded`, description: "Result logged." });
+      if (autoRecap) {
+        jarvis.briefViaPost(`/api/jarvis/recap-race/${race.id}`, `Race ${race.raceNumber} recap`);
+      }
+    },
+    onError: (e: any) => toast({ title: "Invalid", description: e.message, variant: "destructive" }),
+  });
+
+  if (race.result) {
+    const order = JSON.parse(race.result.finishOrder) as string[];
+    const grades: [string, boolean | null][] = [
+      ["WIN", race.result.winHit], ["PLACE", race.result.placeHit],
+      ["SHOW", race.result.showHit], ["4TH", race.result.fourthHit],
+    ];
+    return (
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-gold/10 bg-navy-card p-3" data-testid={`result-row-${race.raceNumber}`}>
+        <div className="flex items-center gap-2 w-28 shrink-0">
+          <span className="font-display font-black text-gold-light tabular-nums">R{race.raceNumber}</span>
+          <TierPill tier={race.tier} size="sm" />
+        </div>
+        <span className="text-xs text-muted-brand tabular-nums">Final {order.join("-")}</span>
+        <div className="flex flex-wrap gap-1.5">
+          {grades.map(([k, hit]) => (
+            <span key={k} className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] uppercase tracking-wide ${hit ? "bg-win/10 text-win" : "bg-loss/10 text-loss"}`}>
+              {k} {hit ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+            </span>
+          ))}
+          {race.result.exactaHit && <span className="rounded bg-win/10 px-2 py-0.5 text-[10px] text-win uppercase">EXA ✅</span>}
+          {race.result.trifectaHit && <span className="rounded bg-win/10 px-2 py-0.5 text-[10px] text-win uppercase">TRI ✅</span>}
+        </div>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="ml-auto text-gold hover:text-gold-light"
+          onClick={() => jarvis.briefViaPost(`/api/jarvis/recap-race/${race.id}`, `Race ${race.raceNumber} recap`)}
+          data-testid={`button-recap-${race.raceNumber}`}
+        >
+          <Volume2 className="h-4 w-4" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-gold/10 bg-navy-card p-3" data-testid={`result-row-${race.raceNumber}`}>
+      <div className="flex items-center gap-2 w-28 shrink-0">
+        <span className="font-display font-black text-gold-light tabular-nums">R{race.raceNumber}</span>
+        <TierPill tier={race.tier} size="sm" />
+      </div>
+      <span className="text-xs text-slate-brand flex-1 min-w-0 truncate">{race.conditions}</span>
+      <Input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="5-3-1-7"
+        className="w-32 bg-navy-section border-gold/15 text-silver tabular-nums"
+        data-testid={`input-finish-${race.raceNumber}`}
+        onKeyDown={(e) => { if (e.key === "Enter") submit.mutate(); }}
+      />
+      <Button
+        size="sm"
+        onClick={() => submit.mutate()}
+        disabled={submit.isPending}
+        className="bg-gold hover:bg-gold-light text-navy-bg"
+        data-testid={`button-submit-${race.raceNumber}`}
+      >
+        Grade
+      </Button>
+    </div>
+  );
+}
+
+export default function Results() {
+  const { data: card, isLoading } = useQuery<CardWithRaces>({ queryKey: ["/api/cards/latest"] });
+  const { data: settings } = useQuery<Settings>({ queryKey: ["/api/settings"] });
+  const jarvis = useJarvis();
+
+  if (isLoading || !card) {
+    return <div className="p-6 space-y-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}</div>;
+  }
+
+  const withResults = card.races.filter((r) => r.result);
+  const n = withResults.length;
+  const sum = (f: (r: RaceWithResult) => boolean | null | undefined) =>
+    withResults.filter((r) => f(r)).length;
+
+  const winN = sum((r) => r.result?.winHit);
+  const placeN = sum((r) => r.result?.placeHit);
+  const showN = sum((r) => r.result?.showHit);
+  const fourthN = sum((r) => r.result?.fourthHit);
+  const exaN = sum((r) => r.result?.exactaHit);
+  const triN = sum((r) => r.result?.trifectaHit);
+  const supN = sum((r) => r.result?.superfectaHit);
+  const itmTotal = withResults.reduce((a, r) => a + (r.result?.itmCount ?? 0), 0);
+
+  // Flag accuracy across the card
+  const flagRows: { flag: string; raceNumber: number; hit: boolean }[] = [];
+  for (const r of card.races) {
+    const flags = JSON.parse(r.flags || "[]") as string[];
+    if (!flags.length) continue;
+    const hitFlags: string[] = r.result ? (JSON.parse(r.result.flagsHit || "[]") as string[]) : [];
+    for (const f of flags) {
+      flagRows.push({ flag: f, raceNumber: r.raceNumber, hit: !!r.result && hitFlags.includes(f) });
+    }
+  }
+
+  return (
+    <div className="p-4 sm:p-6 max-w-[1400px] mx-auto pb-28">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h1 className="text-xl font-display font-black text-silver">Today's Scorecard</h1>
+        <Button
+          onClick={() => jarvis.briefViaPost(`/api/jarvis/summary-card/${card.id}`, `${card.track} card summary`)}
+          className="bg-gold hover:bg-gold-light text-navy-bg font-display font-bold"
+          data-testid="button-card-summary"
+        >
+          <Mic className="h-4 w-4 mr-1.5" /> CARD SUMMARY
+        </Button>
+      </div>
+
+      {/* Running stats */}
+      <div className="mt-4 grid grid-cols-4 sm:grid-cols-8 gap-2">
+        <StatChip label="WIN" value={pct(winN, n)} />
+        <StatChip label="PLACE" value={pct(placeN, n)} />
+        <StatChip label="SHOW" value={pct(showN, n)} />
+        <StatChip label="4TH" value={pct(fourthN, n)} />
+        <StatChip label="EXACTA" value={pct(exaN, n)} />
+        <StatChip label="TRI" value={pct(triN, n)} />
+        <StatChip label="SUPER" value={pct(supN, n)} />
+        <StatChip label="ITM" value={pct(itmTotal, n * 4)} />
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_320px]">
+        {/* Per-race entry */}
+        <div className="space-y-2.5">
+          {card.races.map((r) => (
+            <ResultEntry key={r.id} race={r} autoRecap={!!settings?.autoRecapEnabled} />
+          ))}
+        </div>
+
+        {/* Flag accuracy panel */}
+        <div className="space-y-4">
+          <div className="rounded-lg border border-gold/10 bg-navy-card p-4">
+            <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-3">Flag Accuracy</div>
+            {flagRows.length === 0 ? (
+              <div className="text-xs text-muted-brand">No flags raised on this card.</div>
+            ) : (
+              <div className="space-y-2">
+                {flagRows.map((fr, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs" data-testid={`flag-acc-${i}`}>
+                    <span className="text-muted-brand tabular-nums w-7">R{fr.raceNumber}</span>
+                    <span className="flex-1 text-slate-brand truncate">{fr.flag}</span>
+                    <span className={fr.hit ? "text-win" : "text-loss"}>{fr.hit ? "✅" : "❌"}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-gold/15 bg-navy-section p-4">
+            <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-2">All-Time</div>
+            <div className="text-sm text-silver tabular-nums">1 card · {card.races.length} races</div>
+            <div className="mt-1 text-xs text-muted-brand tabular-nums">
+              Win {pct(winN, n)} · ITM {pct(itmTotal, n * 4)} · {n} of {card.races.length} graded
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
