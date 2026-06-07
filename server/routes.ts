@@ -138,7 +138,11 @@ export async function registerRoutes(
   });
 
   // ── EEA: Upload + analyze a card ──────────────────────────────────────────
-  const uploadDir = path.resolve(process.cwd(), "uploads");
+  // On Railway, set UPLOAD_DIR to a path on the persistent volume
+  // (e.g. /data/uploads). Falls back to ./uploads for local dev.
+  const uploadDir = process.env.UPLOAD_DIR
+    ? path.resolve(process.env.UPLOAD_DIR)
+    : path.resolve(process.cwd(), "uploads");
   fs.mkdirSync(uploadDir, { recursive: true });
   const upload = multer({
     storage: multer.diskStorage({

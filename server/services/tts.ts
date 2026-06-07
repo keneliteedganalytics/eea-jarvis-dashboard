@@ -7,7 +7,11 @@ import { eq } from "drizzle-orm";
 
 // Resolve a stable on-disk cache directory. In dev (tsx/ESM) and prod (esbuild
 // CJS bundle) we anchor to the project working directory so the path is stable.
-export const AUDIO_DIR = path.join(process.cwd(), "server", "audio_cache");
+// On Railway (or any container), set AUDIO_DIR to a path on the persistent
+// volume (e.g. /data/audio_cache). Falls back to the legacy in-repo path for
+// local dev where dotfiles in cwd are fine.
+export const AUDIO_DIR =
+  process.env.AUDIO_DIR || path.join(process.cwd(), "server", "audio_cache");
 fs.mkdirSync(AUDIO_DIR, { recursive: true });
 
 const VOICE_SPEED_SETTINGS = { stability: 0.5, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true };

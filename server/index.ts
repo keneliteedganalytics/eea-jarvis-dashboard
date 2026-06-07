@@ -4,9 +4,61 @@ import type { Request } from 'express';
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 
 const app = express();
 const httpServer = createServer(app);
+
+// ── Trust proxy (Railway / any reverse proxy) ─────────────────────────────
+// Required for correct req.ip + secure-cookie handling behind Railway's edge.
+app.set("trust proxy", 1);
+
+// ── Healthcheck (must be before auth so Railway can probe it) ─────────────
+app.get("/healthz", (_req, res) => {
+  res.status(200).json({ ok: true, ts: new Date().toISOString() });
+});
+
+// ── Optional HTTP Basic Auth ──────────────────────────────────────────────
+// Enabled when BOTH BASIC_AUTH_USER and BASIC_AUTH_PASS are set in the env.
+// When unset (local dev), the site is open. Auth is enforced on EVERY route
+// except /healthz so Railway's edge probe stays unauthenticated.
+const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER || "";
+const BASIC_AUTH_PASS = process.env.BASIC_AUTH_PASS || "";
+if (BASIC_AUTH_USER && BASIC_AUTH_PASS) {
+  const expectedUser = Buffer.from(BASIC_AUTH_USER);
+  const expectedPass = Buffer.from(BASIC_AUTH_PASS);
+  app.use((req, res, next) => {
+    if (req.path === "/healthz") return next();
+    const header = req.headers.authorization || "";
+    if (!header.startsWith("Basic ")) {
+      res.set("WWW-Authenticate", 'Basic realm="EEA Jarvis", charset="UTF-8"');
+      return res.status(401).send("Authentication required");
+    }
+    let user = "", pass = "";
+    try {
+      const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
+      const idx = decoded.indexOf(":");
+      user = idx >= 0 ? decoded.slice(0, idx) : decoded;
+      pass = idx >= 0 ? decoded.slice(idx + 1) : "";
+    } catch {
+      // fall through to 401
+    }
+    const userBuf = Buffer.from(user);
+    const passBuf = Buffer.from(pass);
+    const userOk =
+      userBuf.length === expectedUser.length &&
+      timingSafeEqual(userBuf, expectedUser);
+    const passOk =
+      passBuf.length === expectedPass.length &&
+      timingSafeEqual(passBuf, expectedPass);
+    if (userOk && passOk) return next();
+    res.set("WWW-Authenticate", 'Basic realm="EEA Jarvis", charset="UTF-8"');
+    return res.status(401).send("Authentication required");
+  });
+  console.log("[auth] HTTP basic auth ENABLED for user:", BASIC_AUTH_USER);
+} else {
+  console.log("[auth] HTTP basic auth DISABLED (BASIC_AUTH_USER/PASS not set)");
+}
 
 declare module "http" {
   interface IncomingMessage {
@@ -92,10 +144,14 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
+  // On Railway/containers we must bind 0.0.0.0 so the edge proxy can reach us.
+  // In production we always bind 0.0.0.0 unless HOST is explicitly set.
+  const defaultHost =
+    process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1";
   // reusePort is Linux-only; on macOS it throws ENOTSUP.
   const listenOpts: { port: number; host: string; reusePort?: boolean } = {
     port,
-    host: process.env.HOST || "127.0.0.1",
+    host: process.env.HOST || defaultHost,
   };
   if (process.platform === "linux") {
     listenOpts.reusePort = true;
