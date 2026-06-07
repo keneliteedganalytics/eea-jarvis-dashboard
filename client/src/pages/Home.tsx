@@ -10,7 +10,8 @@ import { tierOf } from "@/lib/tiers";
 import { useJarvis } from "@/lib/jarvis";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Mic, Play, Lock, Check, Upload, Flag } from "lucide-react";
+import { Mic, Play, Lock, Check, Upload, Flag, RefreshCw } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 function StatBox({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
   return (
@@ -129,6 +130,7 @@ const LEGEND: { tier: string; desc: string }[] = [
 export default function Home() {
   const { data: card, isLoading } = useQuery<CardWithRaces>({ queryKey: ["/api/cards/latest"] });
   const jarvis = useJarvis();
+  const { toast } = useToast();
 
   const lockMutation = useMutation({
     mutationFn: async () => {
@@ -136,6 +138,26 @@ export default function Home() {
       await apiRequest("PATCH", `/api/cards/${card.id}`, { locked: true });
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] }),
+  });
+
+  const fetchNowMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/poller/run-now", {});
+      return res.json() as Promise<{ ok: boolean; graded: number; skipped: number; cards: number }>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] });
+      toast({
+        title: data.graded > 0 ? `Graded ${data.graded} race${data.graded === 1 ? "" : "s"}` : "No new results",
+        description:
+          data.graded > 0
+            ? `Pulled fresh results from HorseRacingNation.`
+            : `HRN hasn't posted any new finals yet. Try again in a few minutes.`,
+      });
+    },
+    onError: (e) => {
+      toast({ title: "Fetch failed", description: (e as Error).message, variant: "destructive" });
+    },
   });
 
   if (isLoading || !card) {
@@ -175,6 +197,16 @@ export default function Home() {
               data-testid="button-brief-card"
             >
               <Mic className="h-4 w-4 mr-1.5 shrink-0" /> BRIEF ME ON THE CARD
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => fetchNowMutation.mutate()}
+              disabled={fetchNowMutation.isPending}
+              className="border-gold/30 text-gold hover:bg-gold/10"
+              data-testid="button-fetch-now"
+            >
+              <RefreshCw className={`h-4 w-4 mr-1.5 shrink-0 ${fetchNowMutation.isPending ? "animate-spin" : ""}`} />
+              {fetchNowMutation.isPending ? "Fetching…" : "Fetch Results Now"}
             </Button>
             {!card.locked ? (
               <Button
