@@ -10,15 +10,18 @@ import { AppLayout } from "@/components/AppLayout";
 import { useLiveEvents } from "@/lib/useLiveEvents";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
+import Review from "@/pages/Review";
 import RaceDetail from "@/pages/RaceDetail";
 import Results from "@/pages/Results";
 import Analytics from "@/pages/Analytics";
 import Settings from "@/pages/Settings";
+import Print from "@/pages/Print";
 
 function AppRouter() {
   return (
     <Switch>
       <Route path="/" component={Home} />
+      <Route path="/review/:id" component={Review} />
       <Route path="/race/:n" component={RaceDetail} />
       <Route path="/results" component={Results} />
       <Route path="/analytics" component={Analytics} />
@@ -31,10 +34,16 @@ function AppRouter() {
 function Shell() {
   useLiveEvents();
   return (
-    <AppLayout>
-      <AppRouter />
-      <JarvisPlayer />
-    </AppLayout>
+    <Switch>
+      {/* Standalone printable page — no app chrome, no Jarvis player. */}
+      <Route path="/print" component={Print} />
+      <Route>
+        <AppLayout>
+          <AppRouter />
+          <JarvisPlayer />
+        </AppLayout>
+      </Route>
+    </Switch>
   );
 }
 

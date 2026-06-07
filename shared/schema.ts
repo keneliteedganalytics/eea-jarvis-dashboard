@@ -96,6 +96,18 @@ export const settings = sqliteTable("settings", {
   autoRecapEnabled: integer("auto_recap_enabled", { mode: "boolean" }).notNull().default(true),
   autoFetchEnabled: integer("auto_fetch_enabled", { mode: "boolean" }).notNull().default(true),
   fetchPollMinutes: integer("fetch_poll_minutes").notNull().default(5),
+
+  // ── EEA v1: LLM + bankroll/sizing config ────────────────────────────────
+  anthropicApiKey: text("anthropic_api_key").notNull().default(""),
+  poeApiKey: text("poe_api_key").notNull().default(""),
+  defaultLlmProvider: text("default_llm_provider").notNull().default("anthropic"),
+  defaultAnthropicModel: text("default_anthropic_model").notNull().default("claude-sonnet-4-5"),
+  defaultPoeModel: text("default_poe_model").notNull().default("Claude-Sonnet-4.5"),
+  dailyRiskCapPct: real("daily_risk_cap_pct").notNull().default(0.03),
+  tierShareSniper: real("tier_share_sniper").notNull().default(0.35),
+  tierShareEdge: real("tier_share_edge").notNull().default(0.20),
+  tierShareDual: real("tier_share_dual").notNull().default(0.12),
+  tierShareRecon: real("tier_share_recon").notNull().default(0.08),
 });
 
 // ── Jarvis audio cache ────────────────────────────────────────────────────
@@ -107,6 +119,121 @@ export const audioCache = sqliteTable("audio_cache", {
   text: text("text").notNull(),
   filePath: text("file_path").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+// ── EEA v1: LLM handicapping engine tables ────────────────────────────────
+
+// Uploaded PP/speed-figure PDFs (one row per uploaded file).
+export const ppUploads = sqliteTable("pp_uploads", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  cardId: integer("card_id").notNull(),
+  source: text("source", { enum: ["brisnet", "equibase"] }).notNull(),
+  filename: text("filename").notNull(),
+  storagePath: text("storage_path").notNull(),
+  parsedJson: text("parsed_json"),
+  parseStatus: text("parse_status", { enum: ["pending", "ok", "failed"] })
+    .notNull()
+    .default("pending"),
+  parseError: text("parse_error"),
+  uploadedAt: integer("uploaded_at", { mode: "timestamp" }).notNull(),
+});
+
+// One row per horse per race: the fused figures + the LLM's handicap.
+export const predictions = sqliteTable("predictions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  raceId: integer("race_id").notNull(),
+  horsePgm: text("horse_pgm").notNull(),
+  horseName: text("horse_name").notNull(),
+  eeas: real("eeas"),
+  eeap: real("eeap"),
+  eeac: real("eeac"),
+  eeaRating: real("eea_rating"),
+  tierAssigned: text("tier_assigned", {
+    enum: ["SNIPER", "EDGE", "DUAL", "RECON", "PASS"],
+  }),
+  rank: integer("rank"),
+  llmReasoning: text("llm_reasoning"),
+  personaVersion: integer("persona_version"),
+  figureWeightsJson: text("figure_weights_json"),
+  biasContextJson: text("bias_context_json"),
+  llmProvider: text("llm_provider", { enum: ["anthropic", "poe"] }),
+  llmModel: text("llm_model"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+// Backfilled outcome for a prediction (matched from results).
+export const predictionOutcomes = sqliteTable("prediction_outcomes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  predictionId: integer("prediction_id").notNull(),
+  actualFinish: integer("actual_finish"),
+  beatenLengths: real("beaten_lengths"),
+  winPayout: real("win_payout"),
+  placePayout: real("place_payout"),
+  showPayout: real("show_payout"),
+  wagerPlaced: real("wager_placed"),
+  wagerReturn: real("wager_return"),
+  tripNotes: text("trip_notes"),
+  recordedAt: integer("recorded_at", { mode: "timestamp" }).notNull(),
+});
+
+// Versioned figure weights + persona. The active row has deactivatedAt = null.
+export const formulaVersions = sqliteTable("formula_versions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  weightsJson: text("weights_json").notNull(),
+  personaText: text("persona_text").notNull(),
+  activatedAt: integer("activated_at", { mode: "timestamp" }).notNull(),
+  deactivatedAt: integer("deactivated_at", { mode: "timestamp" }),
+  notes: text("notes"),
+});
+
+// Auto-tuner proposals awaiting user accept/reject.
+export const tuningProposals = sqliteTable("tuning_proposals", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  hypothesis: text("hypothesis").notNull(),
+  evidenceJson: text("evidence_json").notNull(),
+  proposedChangeJson: text("proposed_change_json"),
+  status: text("status", { enum: ["pending", "accepted", "rejected"] })
+    .notNull()
+    .default("pending"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  reviewedAt: integer("reviewed_at", { mode: "timestamp" }),
+});
+
+// Yesterday's track bias card (scraped from HRN charts).
+export const biasReads = sqliteTable("bias_reads", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  date: text("date").notNull(),
+  track: text("track").notNull(),
+  biasJson: text("bias_json").notNull(),
+  source: text("source").notNull().default("hrn"),
+  accuracyScore: real("accuracy_score"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+// Anthropic-generated 2-3 sentence race summary for the printable picks page.
+// Cached per race; regenerated when the active formula/eea version changes.
+export const raceSummaries = sqliteTable("race_summaries", {
+  raceId: integer("race_id").primaryKey(),
+  summary: text("summary").notNull(),
+  eeaVersion: integer("eea_version"),
+  generatedAt: integer("generated_at", { mode: "timestamp" }).notNull(),
+});
+
+// Maiden enrichment (sales/pedigree/works), 24h cached per horse.
+export const maidenEnrichment = sqliteTable("maiden_enrichment", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  raceId: integer("race_id").notNull(),
+  horsePgm: text("horse_pgm").notNull(),
+  salesPrice: real("sales_price"),
+  salesVenue: text("sales_venue"),
+  sireStudFee: real("sire_stud_fee"),
+  damProduce: text("dam_produce"),
+  workoutPattern: text("workout_pattern"),
+  trainerFtsPct: real("trainer_fts_pct"),
+  jockeyUpgrade: integer("jockey_upgrade", { mode: "boolean" }),
+  workmate: text("workmate"),
+  enrichmentJson: text("enrichment_json"),
+  fetchedAt: integer("fetched_at", { mode: "timestamp" }).notNull(),
 });
 
 // ── Insert schemas ────────────────────────────────────────────────────────
@@ -145,3 +272,37 @@ export type AudioCache = typeof audioCache.$inferSelect;
 
 export type RaceWithResult = Race & { result?: Result | null };
 export type CardWithRaces = Card & { races: RaceWithResult[] };
+
+// ── EEA v1 insert schemas + types ─────────────────────────────────────────
+export const insertPpUploadSchema = createInsertSchema(ppUploads).omit({ id: true });
+export const insertPredictionSchema = createInsertSchema(predictions).omit({ id: true });
+export const insertPredictionOutcomeSchema = createInsertSchema(predictionOutcomes).omit({ id: true });
+export const insertFormulaVersionSchema = createInsertSchema(formulaVersions).omit({ id: true });
+export const insertTuningProposalSchema = createInsertSchema(tuningProposals).omit({ id: true });
+export const insertBiasReadSchema = createInsertSchema(biasReads).omit({ id: true });
+export const insertMaidenEnrichmentSchema = createInsertSchema(maidenEnrichment).omit({ id: true });
+export const insertRaceSummarySchema = createInsertSchema(raceSummaries);
+
+export type PpUpload = typeof ppUploads.$inferSelect;
+export type InsertPpUpload = z.infer<typeof insertPpUploadSchema>;
+export type Prediction = typeof predictions.$inferSelect;
+export type InsertPrediction = z.infer<typeof insertPredictionSchema>;
+export type PredictionOutcome = typeof predictionOutcomes.$inferSelect;
+export type InsertPredictionOutcome = z.infer<typeof insertPredictionOutcomeSchema>;
+export type FormulaVersion = typeof formulaVersions.$inferSelect;
+export type InsertFormulaVersion = z.infer<typeof insertFormulaVersionSchema>;
+export type TuningProposal = typeof tuningProposals.$inferSelect;
+export type InsertTuningProposal = z.infer<typeof insertTuningProposalSchema>;
+export type BiasRead = typeof biasReads.$inferSelect;
+export type InsertBiasRead = z.infer<typeof insertBiasReadSchema>;
+export type MaidenEnrichment = typeof maidenEnrichment.$inferSelect;
+export type InsertMaidenEnrichment = z.infer<typeof insertMaidenEnrichmentSchema>;
+export type RaceSummary = typeof raceSummaries.$inferSelect;
+export type InsertRaceSummary = z.infer<typeof insertRaceSummarySchema>;
+
+// Settings additions (EEA): API keys + LLM/figure config live in settings table.
+export const updatePredictionSchema = z.object({
+  llmReasoning: z.string().optional(),
+  tierAssigned: z.enum(["SNIPER", "EDGE", "DUAL", "RECON", "PASS"]).optional(),
+  rank: z.number().int().optional(),
+});

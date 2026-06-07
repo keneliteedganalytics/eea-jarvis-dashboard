@@ -8,13 +8,18 @@ Stack: Next.js-style Vite + React + Tailwind frontend, Express + SQLite backend,
 
 ## What's inside
 
-- **Today's Card** — Drop a PDF, see all races with conviction tier strips (SNIPER / EDGE / DUAL / RECON / PASS), top-line stats, BRIEF ME voice walkthrough button.
+- **Today's Card** — Upload a Brisnet + Equibase PDF pair, the v1 engine parses, fuses, and tiers every race (SNIPER / EDGE / DUAL / RECON / PASS); top-line stats and a BRIEF ME voice walkthrough.
 - **Race Detail** — Top 4 picks (Win/Place/Show/4th) with editable Why & Pace notes, pace shape diagram, suggested wagers by tier, BRIEF THIS RACE voice button.
-- **Results** — Punch in final order, hit Grade, scorecard updates live and Jarvis auto-recaps the race over speakers via SSE.
+- **Print Picks** — One-click printer-friendly daily sheet: one page per card, each race a clean block with its top 4, tier, recommended bets (WIN/PLACE/SHOW + EXACTA/TRIFECTA/SUPERFECTA sized to your bankroll), and a 2–3 sentence Anthropic race summary.
+- **Results** — Punch in final order, hit Grade, scorecard updates live and Jarvis auto-recaps the race over speakers via SSE. An auto-fetch poller backfills finals for locked cards.
 - **Analytics** — KPI cards + 4 Recharts (tier hit rate, ROI/bankroll curve, flag accuracy, race-type performance).
-- **Settings** — Bankroll, per-tier wager amounts, voice picker (8 ElevenLabs premades + your full account voice list), model + speed slider, Test Voice.
+- **Settings** — Bankroll, daily risk cap, per-tier wager amounts, Anthropic/Poe LLM provider + model, voice picker (8 ElevenLabs premades + your full account voice list), model + speed slider, Test Voice.
 
 Seed data includes Saratoga June 7 2026 (11 races, 4 picks each, R1 pre-graded as a worked example).
+
+### The v1 handicapping engine
+
+Upload a Brisnet PP PDF and the matching Equibase PDF on the home page. The engine parses both, fuses the data sources, runs the EEA scoring formula, assigns a conviction tier per race, and hands the structured card to an LLM (Anthropic by default, Poe optional) for the analyst read. You review and edit on the confirm screen, then publish. Set `ANTHROPIC_API_KEY` (or `POE_API_KEY`) in `.env` or under Settings — env takes precedence.
 
 ---
 
@@ -42,9 +47,12 @@ cd eea-dashboard
 # 2. Install dependencies (this takes ~2 min the first time)
 npm install
 
-# 3. Set up your ElevenLabs key
+# 3. Set up your API keys
 cp .env.example .env
-# Open .env in any text editor and paste your key after the =
+# Open .env in any text editor and paste your keys after the =:
+#   ELEVENLABS_API_KEY  — required for Jarvis voice
+#   ANTHROPIC_API_KEY   — required for the v1 engine + print summaries
+#                         (POE_API_KEY works as an alternative provider)
 
 # 4. Build the production bundle
 npm run build
@@ -66,11 +74,13 @@ Open **http://localhost:5000** in your browser. Done.
 ## Daily workflow
 
 1. Open http://localhost:5000 — you'll see Today's Card with all 11 Saratoga races.
-2. Hit **BRIEF ME** in the hero — Jarvis reads the full card overview.
-3. Click any race row to see top-4 picks, pace shape, and wager suggestions.
-4. After a race goes final, go to **Results**, type the order (e.g. `2,11,9,10`), hit **Grade**.
-5. The scorecard updates live and you'll hear Jarvis recap the race automatically.
-6. Check **Analytics** to see tier hit rates, ROI curve, flag accuracy over time.
+2. Upload a Brisnet + Equibase PDF pair in the drop zone to analyze a new card; review and publish on the confirm screen.
+3. Hit **BRIEF ME** in the hero — Jarvis reads the full card overview.
+4. Hit **Print Picks** to open the printer-friendly sheet (bets + Anthropic summaries) and send it to your printer.
+5. Click any race row to see top-4 picks, pace shape, and wager suggestions.
+6. After a race goes final, go to **Results**, type the order (e.g. `2,11,9,10`), hit **Grade** — or let the poller auto-fetch finals.
+7. The scorecard updates live and you'll hear Jarvis recap the race automatically.
+8. Check **Analytics** to see tier hit rates, ROI curve, flag accuracy over time.
 
 Stop the server anytime with `Ctrl+C`. Your data persists in `data.db` in the project root.
 
@@ -80,11 +90,11 @@ Stop the server anytime with `Ctrl+C`. Your data persists in `data.db` in the pr
 
 Right now the system seeds the Saratoga 6/7/2026 card automatically. To add a new card:
 
-**Manual option (works today):**
-Use the Settings page → "Import card" (when wired) or edit `server/storage.ts` `seedSaratogaCard()` to define a new card with races and picks, then restart.
+**PDF auto-import (works today):**
+Drop a Brisnet PP PDF and the matching Equibase PDF into the home-page drop zone. The v1 engine parses both, fuses the sources, scores and tiers every race, and runs the LLM analyst pass. Review the result on the confirm screen, edit any pick, then publish to make it the live card.
 
-**PDF auto-import:**
-The drop zone on the home page is a v1 visual stub. Drop a Quant-Capper PDF there in the next iteration to auto-parse into the database.
+**Manual option:**
+Edit `server/storage.ts` `seedSaratogaCard()` to define a card with races and picks, then delete `data.db` and restart to re-seed.
 
 ---
 
@@ -153,8 +163,9 @@ I can wire option 3 for you whenever — would take ~10 min.
 eea-dashboard/
 ├── client/                  # React + Tailwind frontend
 │   └── src/
-│       ├── pages/           # Home, RaceDetail, Results, Analytics, Settings
-│       ├── components/      # AppLayout, JarvisPlayer, PickCell, brand/
+│       ├── pages/           # Home, Review, RaceDetail, Results, Analytics, Settings, Print
+│       ├── print.css        # Ink-friendly @media print styles for the picks sheet
+│       ├── components/      # AppLayout, JarvisPlayer, PickCell, UploadCard, brand/
 │       └── lib/             # jarvis.tsx (TTS hook), tiers, wagers
 ├── server/                  # Express + SQLite backend
 │   ├── routes.ts            # All API endpoints + seed + poller wiring
@@ -166,8 +177,11 @@ eea-dashboard/
 │       ├── tts.ts           # ElevenLabs proxy + audio cache
 │       ├── scripts.ts       # Brief/recap script generators
 │       ├── events.ts        # SSE event bus
-│       ├── poller.ts        # 60s Equibase results poller
-│       └── equibase.ts      # HTML parser (v1 stub — manual entry preferred)
+│       ├── poller.ts        # results poller (auto-fetch finals for locked cards)
+│       ├── analyze-card.ts  # v1 engine: parse → fuse → score → tier → LLM read
+│       ├── bet-sizer.ts     # Print view: bankroll-aware bet sizing per tier
+│       ├── race-summary.ts  # Print view: cached Anthropic race summaries
+│       └── parsers/         # Brisnet + Equibase PDF parsers
 ├── shared/
 │   └── schema.ts            # Drizzle table defs + Zod schemas
 ├── data.db                  # SQLite (created on first run)
@@ -208,9 +222,8 @@ A better path (next iteration): build a PDF parser so you drop the Quant-Capper 
 
 ## What's NOT included yet (roadmap)
 
-- **PDF auto-import** — drop a Quant-Capper PDF, parse into the DB (visual stub exists).
-- **Equibase auto-fetch** — infrastructure built; HTML parser stubbed. Manual results entry is the path for v1.
-- **Multi-card support** — currently seeds one card. UI is already multi-card aware; just need an import flow.
+- **Payout-aware ROI** — results capture payout fields; the analytics ROI curve still uses flat units.
+- **Multi-card UI polish** — the engine and storage are multi-card; the dashboard surfaces the latest card.
 - **Authentication** — see Security Notes above. Required before public hosting.
 - **Custom voice cloning** — your ElevenLabs Pro tier supports cloning. Pre-built UI to clone "your voice" or a track announcer voice is a 1-hour add.
 

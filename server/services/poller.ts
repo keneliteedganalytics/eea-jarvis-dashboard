@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { storage } from "../storage";
 import { fetchEquibaseResult } from "./equibase";
 import { broadcastEvent } from "./events";
+import { runTuner } from "./tuner";
 
 let pollInterval: NodeJS.Timeout | null = null;
 
@@ -60,6 +61,11 @@ export async function processCard(cardId: number, opts: { ignoreLockAndPost?: bo
       trifectaPayout: result.trifectaPayout,
       superfectaPayout: result.superfectaPayout,
     });
+    backfillOutcomes(race.id, result.finishOrder, {
+      winPayout: result.winPayout,
+      placePayout: result.placePayout,
+      showPayout: result.showPayout,
+    });
     graded++;
 
     broadcastEvent("race_result", {
@@ -69,7 +75,53 @@ export async function processCard(cardId: number, opts: { ignoreLockAndPost?: bo
       autoRecap: settings.autoRecapEnabled,
     });
   }
+
+  // After grading new races, re-run the advisory tuner over all history.
+  if (graded > 0) {
+    try {
+      const t = runTuner();
+      if (t.created > 0) {
+        broadcastEvent("tuning_proposals", { created: t.created });
+      }
+    } catch (e) {
+      console.error("[tuner] error:", e);
+    }
+  }
   return { graded, skipped };
+}
+
+// Match a graded race's finish order against its stored predictions and write a
+// prediction_outcomes row per ranked horse. actualFinish is 1-based position;
+// win/place/show payouts attach to the horses that actually ran 1st/2nd/3rd.
+function backfillOutcomes(
+  raceId: number,
+  finishOrder: string[],
+  payouts: { winPayout: number | null; placePayout: number | null; showPayout: number | null },
+): void {
+  const predictions = storage.getPredictionsByRace(raceId);
+  if (!predictions.length) return;
+
+  const posByPgm = new Map<string, number>();
+  finishOrder.forEach((pgm, i) => {
+    if (!posByPgm.has(pgm)) posByPgm.set(pgm, i + 1);
+  });
+
+  const now = new Date();
+  for (const p of predictions) {
+    const finish = posByPgm.get(p.horsePgm) ?? null;
+    storage.upsertPredictionOutcome({
+      predictionId: p.id,
+      actualFinish: finish,
+      beatenLengths: null,
+      winPayout: finish === 1 ? payouts.winPayout : null,
+      placePayout: finish !== null && finish <= 2 ? payouts.placePayout : null,
+      showPayout: finish !== null && finish <= 3 ? payouts.showPayout : null,
+      wagerPlaced: null,
+      wagerReturn: null,
+      tripNotes: null,
+      recordedAt: now,
+    });
+  }
 }
 
 async function pollLockedCards() {

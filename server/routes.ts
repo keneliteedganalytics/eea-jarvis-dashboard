@@ -1,16 +1,25 @@
 import type { Express, Request, Response } from "express";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
-import { storage, seedSaratogaCard } from "./storage";
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+import fs from "node:fs";
+import multer from "multer";
+import { storage, seedSaratogaCard, seedFormulaVersion } from "./storage";
 import {
   insertCardSchema,
   insertRaceSchema,
   resultSubmitSchema,
   updateRaceTextSchema,
   insertSettingsSchema,
+  updatePredictionSchema,
 } from "@shared/schema";
 import type { Card, Settings } from "@shared/schema";
 import { z } from "zod";
+import { analyzeCard } from "./services/analyze-card";
+import { getOrFetchBias, fetchBias } from "./services/bias-fetcher";
+import { sizeRaceBets } from "./services/bet-sizer";
+import { getOrGenerateRaceSummary } from "./services/race-summary";
 import { buildAnalyticsSummary, buildCardStats } from "./analytics";
 import {
   cardBriefingScript,
@@ -38,6 +47,7 @@ export async function registerRoutes(
 ): Promise<Server> {
   // Seed demo data + start the Equibase poller once the server is ready.
   seedSaratogaCard();
+  seedFormulaVersion();
   startPoller();
 
   // ── Cards ────────────────────────────────────────────────────────────────
@@ -125,6 +135,191 @@ export async function registerRoutes(
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
+  });
+
+  // ── EEA: Upload + analyze a card ──────────────────────────────────────────
+  const uploadDir = path.resolve(process.cwd(), "uploads");
+  fs.mkdirSync(uploadDir, { recursive: true });
+  const upload = multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => cb(null, uploadDir),
+      filename: (_req, file, cb) =>
+        cb(null, `${randomUUID()}-${file.originalname.replace(/[^\w.\-]/g, "_")}`),
+    }),
+    limits: { fileSize: 64 * 1024 * 1024 },
+  });
+
+  // multipart: brisnetPdf, equibasePdf, track, date, provider?
+  app.post(
+    "/api/upload-pps",
+    upload.fields([
+      { name: "brisnetPdf", maxCount: 1 },
+      { name: "equibasePdf", maxCount: 1 },
+    ]),
+    async (req, res) => {
+      const files = req.files as Record<string, Express.Multer.File[]> | undefined;
+      const bris = files?.brisnetPdf?.[0];
+      const equi = files?.equibasePdf?.[0];
+      const track = String(req.body.track || "").trim();
+      const date = String(req.body.date || "").trim();
+      const provider =
+        req.body.provider === "poe" || req.body.provider === "anthropic"
+          ? (req.body.provider as "poe" | "anthropic")
+          : undefined;
+      if (!bris || !equi) {
+        return res.status(400).json({ error: "Both brisnetPdf and equibasePdf are required" });
+      }
+      if (!track || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ error: "track and date (YYYY-MM-DD) are required" });
+      }
+      try {
+        const result = await analyzeCard({
+          track,
+          date,
+          brisnetPath: bris.path,
+          equibasePath: equi.path,
+          brisnetFilename: bris.originalname,
+          equibaseFilename: equi.originalname,
+          provider,
+        });
+        res.status(201).json(result);
+      } catch (e) {
+        res.status(500).json({ error: (e as Error).message });
+      }
+    },
+  );
+
+  // Review payload: card + races + per-race predictions for the confirm screen.
+  app.get("/api/cards/:id/review", (req, res) => {
+    const id = Number(req.params.id);
+    const card = storage.getCardWithRaces(id);
+    if (!card) return res.status(404).json({ error: "Card not found" });
+    const racesWithPredictions = card.races.map((r) => ({
+      ...r,
+      predictions: storage.getPredictionsByRace(r.id),
+    }));
+    res.json({ ...card, races: racesWithPredictions });
+  });
+
+  // Edit a single prediction before publish.
+  app.patch("/api/predictions/:id", (req, res) => {
+    const id = Number(req.params.id);
+    const parsed = updatePredictionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+    const updated = storage.updatePrediction(id, parsed.data);
+    if (!updated) return res.status(404).json({ error: "Prediction not found" });
+    res.json(updated);
+  });
+
+  // Publish: mark the card live (locked = true) so the dashboard + poller act on it.
+  app.post("/api/cards/:id/publish", (req, res) => {
+    const id = Number(req.params.id);
+    const updated = storage.updateCard(id, { locked: true });
+    if (!updated) return res.status(404).json({ error: "Card not found" });
+    res.json(updated);
+  });
+
+  // Discard: delete predictions + the card (cascade removes races/uploads refs).
+  app.post("/api/cards/:id/discard", (req, res) => {
+    const id = Number(req.params.id);
+    const card = storage.getCard(id);
+    if (!card) return res.status(404).json({ error: "Card not found" });
+    storage.deletePredictionsByCard(id);
+    storage.deleteCard(id);
+    res.json({ ok: true });
+  });
+
+  // ── EEA: Printable daily picks ────────────────────────────────────────────
+  // Card + races with per-race bet sizing baked in (one fetch for the print
+  // page). Race summaries are fetched separately/in parallel so the page can
+  // render immediately and fill summaries in as they generate.
+  app.get("/api/cards/:id/print", (req, res) => {
+    const id = Number(req.params.id);
+    const card = storage.getCardWithRaces(id);
+    if (!card) return res.status(404).json({ error: "Card not found" });
+    const settings = storage.getSettings();
+    const racesOnCard = card.races.length;
+    const dailyCap = settings.bankroll * settings.dailyRiskCapPct;
+    const races = card.races.map((r) => {
+      const top = [r.winPgm, r.placePgm, r.showPgm, r.fourthPgm].filter(
+        (p): p is string => !!p,
+      );
+      const bets = sizeRaceBets({
+        tier: r.tier,
+        racesOnCard,
+        settings: { bankroll: settings.bankroll, dailyRiskCapPct: settings.dailyRiskCapPct },
+        top,
+      });
+      const cached = storage.getRaceSummary(r.id);
+      return { ...r, bets, summary: cached?.summary ?? null };
+    });
+    res.json({
+      ...card,
+      races,
+      sizing: {
+        bankroll: settings.bankroll,
+        dailyRiskCapPct: settings.dailyRiskCapPct,
+        dailyCap,
+        racesOnCard,
+      },
+    });
+  });
+
+  // Generate (or return cached) Anthropic 2-3 sentence race summary.
+  app.post("/api/races/:id/summary", async (req, res) => {
+    const raceId = Number(req.params.id);
+    const race = storage.getRace(raceId);
+    if (!race) return res.status(404).json({ error: "Race not found" });
+    try {
+      const summary = await getOrGenerateRaceSummary(race);
+      res.json({ summary });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  // ── EEA: Track bias ───────────────────────────────────────────────────────
+  app.get("/api/bias/today", async (req, res) => {
+    const track = String(req.query.track || storage.getSettings().defaultTrack);
+    const date = String(req.query.date || new Date().toISOString().slice(0, 10));
+    const bias = await getOrFetchBias(track, date).catch((e) => {
+      throw e;
+    });
+    if (!bias) return res.status(404).json({ error: "No bias available" });
+    res.json(bias);
+  });
+
+  app.post("/api/bias/refresh", async (req, res) => {
+    const track = String(req.body.track || storage.getSettings().defaultTrack);
+    const date = String(req.body.date || new Date().toISOString().slice(0, 10));
+    try {
+      const bias = await fetchBias(track, date);
+      if (!bias) return res.status(404).json({ error: "No bias available" });
+      res.json(bias);
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  // ── EEA: Tuning proposals ─────────────────────────────────────────────────
+  app.get("/api/tuning-proposals", (_req, res) => {
+    res.json(storage.getPendingProposals());
+  });
+
+  app.post("/api/tuning-proposals/:id/accept", (req, res) => {
+    const id = Number(req.params.id);
+    const updated = storage.updateProposalStatus(id, "accepted");
+    if (!updated) return res.status(404).json({ error: "Proposal not found" });
+    res.json(updated);
+  });
+
+  app.post("/api/tuning-proposals/:id/reject", (req, res) => {
+    const id = Number(req.params.id);
+    const updated = storage.updateProposalStatus(id, "rejected");
+    if (!updated) return res.status(404).json({ error: "Proposal not found" });
+    res.json(updated);
   });
 
   // ── Settings ─────────────────────────────────────────────────────────────
