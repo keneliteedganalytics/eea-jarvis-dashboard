@@ -17,6 +17,7 @@ import {
 import type { Card, Settings } from "@shared/schema";
 import { z } from "zod";
 import { analyzeCard } from "./services/analyze-card";
+import { backfillNullScoreCards } from "./services/card-finishing";
 import { getOrFetchBias, fetchBias } from "./services/bias-fetcher";
 import { sizeRaceBets } from "./services/bet-sizer";
 import { getOrGenerateRaceSummary } from "./services/race-summary";
@@ -49,6 +50,9 @@ export async function registerRoutes(
   // Seed demo data + start the Equibase poller once the server is ready.
   seedSaratogaCard();
   seedFormulaVersion();
+  // Repair any older cards persisted with null numeric scores (e.g. the
+  // Finger Lakes card) by reconstructing scores from their prediction rows.
+  backfillNullScoreCards(storage);
   startPoller();
 
   // ── Cards ────────────────────────────────────────────────────────────────
