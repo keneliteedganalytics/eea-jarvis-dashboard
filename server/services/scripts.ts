@@ -90,13 +90,30 @@ export function raceRecapScript(race: Race, result: Result): string {
   const exacta = result.exactaHit ? "Exacta cashes." : "Exacta busted.";
   const tri = result.trifectaHit ? "Trifecta cashes." : "Trifecta missed.";
 
-  const payout = result.winPayout
-    ? `Win price: ${formatMoney(result.winPayout)}. Exacta paid ${formatMoney(result.exactaPayout || 0)}.`
-    : "";
+  // Build payout line piece-by-piece so we only mention pools that actually paid.
+  const payoutParts: string[] = [];
+  if (result.winPayout) payoutParts.push(`Win paid ${formatMoney(result.winPayout)}`);
+  if (result.placePayout) payoutParts.push(`place ${formatMoney(result.placePayout)}`);
+  if (result.showPayout) payoutParts.push(`show ${formatMoney(result.showPayout)}`);
+  if (result.exactaPayout) payoutParts.push(`exacta ${formatMoney(result.exactaPayout)}`);
+  if (result.trifectaPayout) payoutParts.push(`trifecta ${formatMoney(result.trifectaPayout)}`);
+  if (result.superfectaPayout) payoutParts.push(`superfecta ${formatMoney(result.superfectaPayout)}`);
+  const payout = payoutParts.length ? `${payoutParts.join(", ")}.` : "";
 
   const itm = `${result.itmCount} of 4 picks in the money.`;
 
-  return `Race ${race.raceNumber} final. ${order.join(", ")}. ${grade} ${place} ${show} ${exacta} ${tri} ${payout} ${itm}`.replace(/\s+/g, " ").trim();
+  // Use periods between clauses so ElevenLabs pauses naturally.
+  return [
+    `Race ${race.raceNumber} final.`,
+    `Order of finish: ${order.join(", ")}.`,
+    grade,
+    place,
+    show,
+    exacta,
+    tri,
+    payout,
+    itm,
+  ].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 }
 
 export interface CardStats {
