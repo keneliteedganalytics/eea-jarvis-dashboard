@@ -30,6 +30,7 @@ import {
 import { generateSpeech, getCachedFilePath, fetchVoices } from "./services/tts";
 import { addSseClient, removeSseClient } from "./services/events";
 import { startPoller, runPollerNow } from "./services/poller";
+import { voiceRouter } from "./routes/voice";
 
 // Helper: load TTS settings (voice / model / speed) from storage.
 function ttsSettings(): { voiceId: string; modelId: string; speed: number } {
@@ -432,6 +433,9 @@ export async function registerRoutes(
       res.status(500).json({ error: (e as Error).message });
     }
   });
+
+  // ── Voice subsystem (live trackside observations) ─────────────────────────
+  app.use("/api/voice", voiceRouter());
 
   // ── Voices proxy ─────────────────────────────────────────────────────────
   app.get("/api/voices", async (_req, res) => {

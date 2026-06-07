@@ -12,6 +12,8 @@ import {
   biasReads,
   maidenEnrichment,
   raceSummaries,
+  voiceConversations,
+  predictionHistory,
 } from "@shared/schema";
 import type {
   Card,
@@ -39,9 +41,11 @@ import type {
   InsertMaidenEnrichment,
   RaceSummary,
   InsertRaceSummary,
+  VoiceConversation,
+  PredictionHistory,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, desc } from "drizzle-orm";
 import { gradeRace, gradeFlags } from "./grading";
 import { DEFAULT_WEIGHTS, PERSONA_V1 } from "./services/eea-config";
 
@@ -114,6 +118,28 @@ export interface IStorage {
   // Race summaries (print view, Anthropic-generated)
   getRaceSummary(raceId: number): RaceSummary | undefined;
   upsertRaceSummary(row: InsertRaceSummary & { raceId: number }): RaceSummary;
+
+  // ── Voice subsystem ─────────────────────────────────────────────────────
+  createVoiceConversation(row: {
+    cardId: number;
+    userTranscript: string;
+    jarvisResponse: string;
+    appliedChanges?: string | null;
+    contextSummary?: string | null;
+  }): VoiceConversation;
+  getVoiceConversations(cardId: number): VoiceConversation[];
+  getVoiceConversation(id: number): VoiceConversation | undefined;
+  createVoiceConversationApplied(id: number, appliedChangesJson: string): void;
+  markVoiceConversationReverted(id: number): void;
+  getLastAppliedVoiceConversation(cardId: number): VoiceConversation | undefined;
+
+  snapshotRace(
+    cardId: number,
+    raceId: number,
+    trigger: "initial" | "voice_update" | "manual",
+    voiceConversationId?: number,
+  ): PredictionHistory;
+  getLatestSnapshot(raceId: number): PredictionHistory | undefined;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -449,6 +475,104 @@ export class DatabaseStorage implements IStorage {
   upsertRaceSummary(row: InsertRaceSummary & { raceId: number }): RaceSummary {
     db.delete(raceSummaries).where(eq(raceSummaries.raceId, row.raceId)).run();
     return db.insert(raceSummaries).values(row).returning().get();
+  }
+
+  // ── Voice subsystem ─────────────────────────────────────────────────────
+  createVoiceConversation(row: {
+    cardId: number;
+    userTranscript: string;
+    jarvisResponse: string;
+    appliedChanges?: string | null;
+    contextSummary?: string | null;
+  }): VoiceConversation {
+    return db
+      .insert(voiceConversations)
+      .values({
+        cardId: row.cardId,
+        userTranscript: row.userTranscript,
+        jarvisResponse: row.jarvisResponse,
+        appliedChanges: row.appliedChanges ?? null,
+        contextSummary: row.contextSummary ?? null,
+        createdAt: new Date(),
+      })
+      .returning()
+      .get();
+  }
+
+  getVoiceConversations(cardId: number): VoiceConversation[] {
+    return db
+      .select()
+      .from(voiceConversations)
+      .where(eq(voiceConversations.cardId, cardId))
+      .orderBy(voiceConversations.id)
+      .all();
+  }
+
+  getVoiceConversation(id: number): VoiceConversation | undefined {
+    return db.select().from(voiceConversations).where(eq(voiceConversations.id, id)).get();
+  }
+
+  createVoiceConversationApplied(id: number, appliedChangesJson: string): void {
+    db.update(voiceConversations)
+      .set({ appliedChanges: appliedChangesJson })
+      .where(eq(voiceConversations.id, id))
+      .run();
+  }
+
+  markVoiceConversationReverted(id: number): void {
+    db.update(voiceConversations).set({ reverted: true }).where(eq(voiceConversations.id, id)).run();
+  }
+
+  // Most recent conversation on this card that applied changes and isn't reverted.
+  getLastAppliedVoiceConversation(cardId: number): VoiceConversation | undefined {
+    return db
+      .select()
+      .from(voiceConversations)
+      .where(and(eq(voiceConversations.cardId, cardId), eq(voiceConversations.reverted, false)))
+      .orderBy(desc(voiceConversations.id))
+      .all()
+      .find((c) => !!c.appliedChanges && c.appliedChanges !== "[]");
+  }
+
+  // Snapshot the mutable race fields so a voice update can be reverted.
+  snapshotRace(
+    cardId: number,
+    raceId: number,
+    trigger: "initial" | "voice_update" | "manual",
+    voiceConversationId?: number,
+  ): PredictionHistory {
+    const race = this.getRace(raceId);
+    const snapshot = race
+      ? JSON.stringify({
+          tier: race.tier,
+          winPgm: race.winPgm, winName: race.winName, winScore: race.winScore,
+          placePgm: race.placePgm, placeName: race.placeName, placeScore: race.placeScore,
+          showPgm: race.showPgm, showName: race.showName, showScore: race.showScore,
+          fourthPgm: race.fourthPgm, fourthName: race.fourthName, fourthScore: race.fourthScore,
+          read: race.read, shape: race.shape, flags: race.flags,
+        })
+      : "{}";
+    return db
+      .insert(predictionHistory)
+      .values({
+        cardId,
+        raceId,
+        snapshot,
+        trigger,
+        voiceConversationId: voiceConversationId ?? null,
+        createdAt: new Date(),
+      })
+      .returning()
+      .get();
+  }
+
+  getLatestSnapshot(raceId: number): PredictionHistory | undefined {
+    return db
+      .select()
+      .from(predictionHistory)
+      .where(eq(predictionHistory.raceId, raceId))
+      .orderBy(desc(predictionHistory.id))
+      .all()[0];
   }
 }
 

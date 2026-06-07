@@ -10,7 +10,7 @@ import { PERSONA_V1 } from "./eea-config";
 import type { Race } from "@shared/schema";
 
 const SUMMARY_INSTRUCTION =
-  "In 2-3 sentences, explain the betting angle for this race. Focus on why the top pick has the edge and what the key risk is. Plain prose, no bullet points, no headings.";
+  "In 2-3 sentences, give the betting angle for this race the way you'd say it to a sharp friend at the rail. Lead with why the top pick has the edge, name the one risk that could beat it. Plain confident prose — no hedging, no bullet points, no headings, no preamble like \"this race\" or \"in summary\".";
 
 function resolveAnthropicConfig(): { apiKey: string; model: string; persona: string } {
   const s = storage.getSettings();

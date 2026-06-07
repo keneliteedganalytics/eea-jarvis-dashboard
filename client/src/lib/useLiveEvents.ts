@@ -30,6 +30,10 @@ export function useLiveEvents() {
           }
         } else if (event.type === "tuning_proposals") {
           queryClient.invalidateQueries({ queryKey: ["/api/tuning-proposals"] });
+        } else if (event.type === "card_updated") {
+          // Silent in-place recompute after a voice tier change / undo.
+          queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/cards"] });
         }
       } catch {
         /* ignore malformed */
