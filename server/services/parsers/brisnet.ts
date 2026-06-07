@@ -20,10 +20,8 @@
 //      which supply speedLast / classRating / bestSpeedDist per pgm.
 // Roster = union of PP blocks; figures are merged in by pgm.
 
-import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 import type { BrisnetCard, BrisnetRace, BrisnetHorse, RaceConditions } from "./types";
-
-const require = createRequire(import.meta.url);
 
 // Decode one Brisnet-encoded string: shift each glyph code by +0x1F back to ASCII.
 export function decodeBrisnet(s: string): string {
@@ -57,8 +55,7 @@ interface PageData {
 async function extractPages(pdfPath: string): Promise<PageData[]> {
   // pdfjs legacy build is a CommonJS / ESM hybrid; load via dynamic import for tsx.
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const fs = require("fs") as typeof import("fs");
-  const data = new Uint8Array(fs.readFileSync(pdfPath));
+  const data = new Uint8Array(readFileSync(pdfPath));
   const doc = await pdfjs.getDocument({ data }).promise;
   const pages: PageData[] = [];
   for (let p = 1; p <= doc.numPages; p++) {
