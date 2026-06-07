@@ -6,6 +6,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { JarvisProvider } from "@/lib/jarvis";
 import { JarvisPlayer } from "@/components/JarvisPlayer";
+import { VoiceProvider } from "@/lib/voice/useVoiceJarvis";
+import { VoiceDock } from "@/components/voice/VoiceDock";
 import { AppLayout } from "@/components/AppLayout";
 import { useLiveEvents } from "@/lib/useLiveEvents";
 import NotFound from "@/pages/not-found";
@@ -41,6 +43,7 @@ function Shell() {
         <AppLayout>
           <AppRouter />
           <JarvisPlayer />
+          <VoiceDock />
         </AppLayout>
       </Route>
     </Switch>
@@ -53,9 +56,11 @@ function App() {
       <TooltipProvider>
         <Toaster />
         <JarvisProvider>
-          <Router hook={useHashLocation}>
-            <Shell />
-          </Router>
+          <VoiceProvider>
+            <Router hook={useHashLocation}>
+              <Shell />
+            </Router>
+          </VoiceProvider>
         </JarvisProvider>
       </TooltipProvider>
     </QueryClientProvider>

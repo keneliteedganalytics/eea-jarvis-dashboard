@@ -164,6 +164,28 @@ CREATE TABLE IF NOT EXISTS maiden_enrichment (
   enrichment_json TEXT,
   fetched_at INTEGER NOT NULL
 );
+
+-- ── Voice subsystem tables ────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS voice_conversations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  card_id INTEGER NOT NULL,
+  user_transcript TEXT NOT NULL,
+  jarvis_response TEXT NOT NULL,
+  applied_changes TEXT,
+  context_summary TEXT,
+  reverted INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS prediction_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  card_id INTEGER NOT NULL,
+  race_id INTEGER NOT NULL,
+  snapshot TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  voice_conversation_id INTEGER,
+  created_at INTEGER NOT NULL
+);
 `);
 
 // Idempotent settings-column migration for installs that predate EEA v1.

@@ -236,6 +236,33 @@ export const maidenEnrichment = sqliteTable("maiden_enrichment", {
   fetchedAt: integer("fetched_at", { mode: "timestamp" }).notNull(),
 });
 
+// ── Voice (live trackside observations) ───────────────────────────────────
+
+// One row per voice exchange: Ken's transcript + Jarvis's spoken reply, plus
+// the changes that were applied if he confirmed. Persisted per card so the
+// conversation can be scrolled back and updates audited.
+export const voiceConversations = sqliteTable("voice_conversations", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  cardId: integer("card_id").notNull(),
+  userTranscript: text("user_transcript").notNull(),
+  jarvisResponse: text("jarvis_response").notNull(),
+  appliedChanges: text("applied_changes"), // JSON array of TierChange
+  contextSummary: text("context_summary"),
+  reverted: integer("reverted", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// Append-only snapshot of a race's picks/tier so a voice update can be undone.
+export const predictionHistory = sqliteTable("prediction_history", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  cardId: integer("card_id").notNull(),
+  raceId: integer("race_id").notNull(),
+  snapshot: text("snapshot").notNull(), // JSON of the race fields before the change
+  trigger: text("trigger", { enum: ["initial", "voice_update", "manual"] }).notNull(),
+  voiceConversationId: integer("voice_conversation_id"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
 // ── Insert schemas ────────────────────────────────────────────────────────
 export const insertCardSchema = createInsertSchema(cards).omit({
   id: true,
@@ -299,6 +326,21 @@ export type MaidenEnrichment = typeof maidenEnrichment.$inferSelect;
 export type InsertMaidenEnrichment = z.infer<typeof insertMaidenEnrichmentSchema>;
 export type RaceSummary = typeof raceSummaries.$inferSelect;
 export type InsertRaceSummary = z.infer<typeof insertRaceSummarySchema>;
+
+// ── Voice types ───────────────────────────────────────────────────────────
+export type VoiceConversation = typeof voiceConversations.$inferSelect;
+export type PredictionHistory = typeof predictionHistory.$inferSelect;
+
+// A single proposed (and later applied) tier/pick change for one race.
+export const tierChangeSchema = z.object({
+  raceId: z.number().int(),
+  horsePgm: z.string().optional(),
+  horseName: z.string().optional(),
+  oldTier: z.enum(["SNIPER", "EDGE", "DUAL", "RECON", "PASS"]),
+  newTier: z.enum(["SNIPER", "EDGE", "DUAL", "RECON", "PASS"]),
+  reason: z.string(),
+});
+export type TierChange = z.infer<typeof tierChangeSchema>;
 
 // Settings additions (EEA): API keys + LLM/figure config live in settings table.
 export const updatePredictionSchema = z.object({
