@@ -358,14 +358,25 @@ export function seedSaratogaCard(): void {
   const r2 = card.races.find((r) => r.raceNumber === 2);
   if (r2) {
     storage.logResult(r2.id, ["2", "11", "9", "10"], {
-      winPayout: null,
-      placePayout: null,
-      showPayout: null,
+      winPayout: 8.86,
+      placePayout: 4.74,
+      showPayout: 4.20,
+      exactaPayout: null,
+    });
+  }
+
+  // Seed R3 result: finish 3-1-4-5 → SNIPER tier WIN ✅ + SHOW ✅, ITM 3/4. Top pick #3 Scottish Lassie won at $3.50.
+  const r3 = card.races.find((r) => r.raceNumber === 3);
+  if (r3) {
+    storage.logResult(r3.id, ["3", "1", "4", "5"], {
+      winPayout: 3.50,
+      placePayout: 2.24,
+      showPayout: 2.10,
       exactaPayout: null,
     });
   }
 
   // Ensure a settings row exists.
   storage.getSettings();
-  console.log("[seed] Saratoga 2026-06-07 card seeded with 11 races + R1, R2 results");
+  console.log("[seed] Saratoga 2026-06-07 card seeded with 11 races + R1, R2, R3 results");
 }
