@@ -343,7 +343,7 @@ export function seedSaratogaCard(): void {
     raceRows,
   );
 
-  // Seed R1 result: finish 2-1-7-5 → WIN ✅
+  // Seed R1 result: finish 2-1-7-5 → WIN ✅ (PLACE/SHOW/4TH ❌, ITM 2/4)
   const r1 = card.races.find((r) => r.raceNumber === 1);
   if (r1) {
     storage.logResult(r1.id, ["2", "1", "7", "5"], {
@@ -354,7 +354,18 @@ export function seedSaratogaCard(): void {
     });
   }
 
+  // Seed R2 result: finish 2-11-9-10 → 4TH-slot pick #2 won outright, top-3 missed ITM, our 4th pick took it. ITM 1/4.
+  const r2 = card.races.find((r) => r.raceNumber === 2);
+  if (r2) {
+    storage.logResult(r2.id, ["2", "11", "9", "10"], {
+      winPayout: null,
+      placePayout: null,
+      showPayout: null,
+      exactaPayout: null,
+    });
+  }
+
   // Ensure a settings row exists.
   storage.getSettings();
-  console.log("[seed] Saratoga 2026-06-07 card seeded with 11 races + R1 result");
+  console.log("[seed] Saratoga 2026-06-07 card seeded with 11 races + R1, R2 results");
 }
