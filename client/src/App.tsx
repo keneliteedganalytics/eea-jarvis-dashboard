@@ -15,6 +15,7 @@ import RaceDetail from "@/pages/RaceDetail";
 import Results from "@/pages/Results";
 import Analytics from "@/pages/Analytics";
 import Settings from "@/pages/Settings";
+import Print from "@/pages/Print";
 
 function AppRouter() {
   return (
@@ -33,10 +34,16 @@ function AppRouter() {
 function Shell() {
   useLiveEvents();
   return (
-    <AppLayout>
-      <AppRouter />
-      <JarvisPlayer />
-    </AppLayout>
+    <Switch>
+      {/* Standalone printable page — no app chrome, no Jarvis player. */}
+      <Route path="/print" component={Print} />
+      <Route>
+        <AppLayout>
+          <AppRouter />
+          <JarvisPlayer />
+        </AppLayout>
+      </Route>
+    </Switch>
   );
 }
 

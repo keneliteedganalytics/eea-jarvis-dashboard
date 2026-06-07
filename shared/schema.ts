@@ -210,6 +210,15 @@ export const biasReads = sqliteTable("bias_reads", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
+// Anthropic-generated 2-3 sentence race summary for the printable picks page.
+// Cached per race; regenerated when the active formula/eea version changes.
+export const raceSummaries = sqliteTable("race_summaries", {
+  raceId: integer("race_id").primaryKey(),
+  summary: text("summary").notNull(),
+  eeaVersion: integer("eea_version"),
+  generatedAt: integer("generated_at", { mode: "timestamp" }).notNull(),
+});
+
 // Maiden enrichment (sales/pedigree/works), 24h cached per horse.
 export const maidenEnrichment = sqliteTable("maiden_enrichment", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -272,6 +281,7 @@ export const insertFormulaVersionSchema = createInsertSchema(formulaVersions).om
 export const insertTuningProposalSchema = createInsertSchema(tuningProposals).omit({ id: true });
 export const insertBiasReadSchema = createInsertSchema(biasReads).omit({ id: true });
 export const insertMaidenEnrichmentSchema = createInsertSchema(maidenEnrichment).omit({ id: true });
+export const insertRaceSummarySchema = createInsertSchema(raceSummaries);
 
 export type PpUpload = typeof ppUploads.$inferSelect;
 export type InsertPpUpload = z.infer<typeof insertPpUploadSchema>;
@@ -287,6 +297,8 @@ export type BiasRead = typeof biasReads.$inferSelect;
 export type InsertBiasRead = z.infer<typeof insertBiasReadSchema>;
 export type MaidenEnrichment = typeof maidenEnrichment.$inferSelect;
 export type InsertMaidenEnrichment = z.infer<typeof insertMaidenEnrichmentSchema>;
+export type RaceSummary = typeof raceSummaries.$inferSelect;
+export type InsertRaceSummary = z.infer<typeof insertRaceSummarySchema>;
 
 // Settings additions (EEA): API keys + LLM/figure config live in settings table.
 export const updatePredictionSchema = z.object({

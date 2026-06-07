@@ -1,0 +1,181 @@
+/* Printable daily picks — screen preview is dark-on-light; @media print
+   forces a clean black-on-white ink-friendly layout. One card per page;
+   each race is a block that won't split mid-race. */
+
+.print-page {
+  background: #ffffff;
+  color: #111111;
+  font-family: "DM Sans", "Inter", system-ui, sans-serif;
+  max-width: 8in;
+  margin: 0 auto;
+  padding: 0.5in;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.print-header {
+  border-bottom: 2px solid #111;
+  padding-bottom: 8px;
+  margin-bottom: 14px;
+}
+.print-header h1 {
+  font-size: 16pt;
+  font-weight: 800;
+  letter-spacing: -0.011em;
+  margin: 0;
+}
+.print-header .meta {
+  font-size: 10pt;
+  color: #333;
+  margin-top: 2px;
+}
+
+.print-card {
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.print-race {
+  border: 1px solid #999;
+  border-radius: 4px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.print-race-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.print-race-head .rno {
+  font-size: 13pt;
+  font-weight: 800;
+}
+.print-race-head .cond {
+  font-size: 9.5pt;
+  color: #333;
+  flex: 1;
+}
+
+/* Tier badge: solid color box, black bold text, no gradient/shadow. */
+.tier-badge {
+  display: inline-block;
+  font-size: 8.5pt;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 3px;
+  color: #111 !important;
+  border: 1px solid #111;
+}
+.tier-SNIPER { background: #f6c945; }
+.tier-EDGE   { background: #ffd98a; }
+.tier-DUAL   { background: #d7e3f4; }
+.tier-RECON  { background: #e6e6e6; }
+.tier-PASS   { background: #f0f0f0; color: #555 !important; }
+
+.print-picks {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9pt;
+  margin: 4px 0 8px;
+}
+.print-picks th,
+.print-picks td {
+  border: 1px solid #bbb;
+  padding: 3px 6px;
+  text-align: left;
+}
+.print-picks th {
+  background: #f4f4f4;
+  font-weight: 700;
+  font-size: 8pt;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.print-picks .col-num,
+.print-picks .col-pgm,
+.print-picks .col-rating,
+.print-picks .col-ml {
+  text-align: right;
+  font-variant-numeric: tabular-nums lining-nums;
+  white-space: nowrap;
+}
+
+.print-bets {
+  font-size: 9pt;
+  margin-top: 4px;
+}
+.print-bets .bets-title {
+  font-weight: 700;
+  font-size: 8pt;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #333;
+  margin-bottom: 2px;
+}
+.print-bets ul {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+}
+.print-bets li {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px dotted #ccc;
+  padding: 1px 0;
+}
+.print-bets .pass {
+  font-weight: 700;
+  color: #555;
+}
+
+.print-summary {
+  font-size: 9.5pt;
+  line-height: 1.35;
+  margin-top: 6px;
+  font-style: italic;
+  color: #222;
+}
+.print-summary .label {
+  font-style: normal;
+  font-weight: 700;
+  font-size: 8pt;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #333;
+  display: block;
+  margin-bottom: 1px;
+}
+.print-summary .skeleton {
+  font-style: normal;
+  color: #888;
+}
+
+@page {
+  size: letter portrait;
+  margin: 0.5in;
+}
+
+@media print {
+  /* Clean ink-friendly canvas. */
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    background-image: none !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-page {
+    padding: 0;
+    max-width: none;
+  }
+  /* Hide decorative icons; keep meaningful text/tier badges. */
+  svg, img {
+    display: none !important;
+  }
+}

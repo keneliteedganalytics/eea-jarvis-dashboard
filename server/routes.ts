@@ -18,6 +18,8 @@ import type { Card, Settings } from "@shared/schema";
 import { z } from "zod";
 import { analyzeCard } from "./services/analyze-card";
 import { getOrFetchBias, fetchBias } from "./services/bias-fetcher";
+import { sizeRaceBets } from "./services/bet-sizer";
+import { getOrGenerateRaceSummary } from "./services/race-summary";
 import { buildAnalyticsSummary, buildCardStats } from "./analytics";
 import {
   cardBriefingScript,
@@ -227,6 +229,55 @@ export async function registerRoutes(
     storage.deletePredictionsByCard(id);
     storage.deleteCard(id);
     res.json({ ok: true });
+  });
+
+  // ── EEA: Printable daily picks ────────────────────────────────────────────
+  // Card + races with per-race bet sizing baked in (one fetch for the print
+  // page). Race summaries are fetched separately/in parallel so the page can
+  // render immediately and fill summaries in as they generate.
+  app.get("/api/cards/:id/print", (req, res) => {
+    const id = Number(req.params.id);
+    const card = storage.getCardWithRaces(id);
+    if (!card) return res.status(404).json({ error: "Card not found" });
+    const settings = storage.getSettings();
+    const racesOnCard = card.races.length;
+    const dailyCap = settings.bankroll * settings.dailyRiskCapPct;
+    const races = card.races.map((r) => {
+      const top = [r.winPgm, r.placePgm, r.showPgm, r.fourthPgm].filter(
+        (p): p is string => !!p,
+      );
+      const bets = sizeRaceBets({
+        tier: r.tier,
+        racesOnCard,
+        settings: { bankroll: settings.bankroll, dailyRiskCapPct: settings.dailyRiskCapPct },
+        top,
+      });
+      const cached = storage.getRaceSummary(r.id);
+      return { ...r, bets, summary: cached?.summary ?? null };
+    });
+    res.json({
+      ...card,
+      races,
+      sizing: {
+        bankroll: settings.bankroll,
+        dailyRiskCapPct: settings.dailyRiskCapPct,
+        dailyCap,
+        racesOnCard,
+      },
+    });
+  });
+
+  // Generate (or return cached) Anthropic 2-3 sentence race summary.
+  app.post("/api/races/:id/summary", async (req, res) => {
+    const raceId = Number(req.params.id);
+    const race = storage.getRace(raceId);
+    if (!race) return res.status(404).json({ error: "Race not found" });
+    try {
+      const summary = await getOrGenerateRaceSummary(race);
+      res.json({ summary });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
   });
 
   // ── EEA: Track bias ───────────────────────────────────────────────────────

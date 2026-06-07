@@ -11,6 +11,7 @@ import {
   tuningProposals,
   biasReads,
   maidenEnrichment,
+  raceSummaries,
 } from "@shared/schema";
 import type {
   Card,
@@ -36,6 +37,8 @@ import type {
   InsertBiasRead,
   MaidenEnrichment,
   InsertMaidenEnrichment,
+  RaceSummary,
+  InsertRaceSummary,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, isNull } from "drizzle-orm";
@@ -107,6 +110,10 @@ export interface IStorage {
   // Maiden enrichment
   upsertMaidenEnrichment(row: InsertMaidenEnrichment): MaidenEnrichment;
   getMaidenEnrichment(raceId: number, horsePgm: string): MaidenEnrichment | undefined;
+
+  // Race summaries (print view, Anthropic-generated)
+  getRaceSummary(raceId: number): RaceSummary | undefined;
+  upsertRaceSummary(row: InsertRaceSummary & { raceId: number }): RaceSummary;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -432,6 +439,16 @@ export class DatabaseStorage implements IStorage {
         ),
       )
       .get();
+  }
+
+  // ── Print view: Anthropic race summaries ──────────────────────────────────
+  getRaceSummary(raceId: number): RaceSummary | undefined {
+    return db.select().from(raceSummaries).where(eq(raceSummaries.raceId, raceId)).get();
+  }
+
+  upsertRaceSummary(row: InsertRaceSummary & { raceId: number }): RaceSummary {
+    db.delete(raceSummaries).where(eq(raceSummaries.raceId, row.raceId)).run();
+    return db.insert(raceSummaries).values(row).returning().get();
   }
 }
 

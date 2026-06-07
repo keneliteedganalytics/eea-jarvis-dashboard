@@ -10,7 +10,7 @@ import { tierOf } from "@/lib/tiers";
 import { useJarvis } from "@/lib/jarvis";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Mic, Play, Lock, Check, Flag, RefreshCw } from "lucide-react";
+import { Mic, Play, Lock, Check, Flag, RefreshCw, Printer } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { UploadCard } from "@/components/UploadCard";
 
@@ -198,6 +198,14 @@ export default function Home() {
               data-testid="button-brief-card"
             >
               <Mic className="h-4 w-4 mr-1.5 shrink-0" /> BRIEF ME ON THE CARD
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => window.open("#/print", "_blank")}
+              className="border-gold/30 text-gold hover:bg-gold/10"
+              data-testid="button-print-picks"
+            >
+              <Printer className="h-4 w-4 mr-1.5 shrink-0" /> Print Picks
             </Button>
             <Button
               variant="outline"
