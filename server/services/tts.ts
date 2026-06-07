@@ -12,20 +12,76 @@ fs.mkdirSync(AUDIO_DIR, { recursive: true });
 
 const VOICE_SPEED_SETTINGS = { stability: 0.5, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true };
 
-// Convert a dollar amount like "$6.82" -> "six dollars and eighty-two cents",
-// "$2,542.20" -> "two thousand five hundred forty-two dollars and twenty cents".
+// ---------------------------------------------------------------------------
+// Number-to-words. Spelling out money is far more reliable on ElevenLabs than
+// passing raw digits — the model otherwise runs "$6.82" into "six-eighty-two".
+// Covers 0 through 999,999,999. Returns lowercase, no commas, no "and".
+// ---------------------------------------------------------------------------
+const ONES = [
+  "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+  "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+  "sixteen", "seventeen", "eighteen", "nineteen",
+];
+const TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+
+function intToWords(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return String(n);
+  if (n === 0) return "zero";
+
+  const parts: string[] = [];
+
+  const billions = Math.floor(n / 1_000_000_000);
+  if (billions > 0) {
+    parts.push(`${intToWords(billions)} billion`);
+    n %= 1_000_000_000;
+  }
+  const millions = Math.floor(n / 1_000_000);
+  if (millions > 0) {
+    parts.push(`${intToWords(millions)} million`);
+    n %= 1_000_000;
+  }
+  const thousands = Math.floor(n / 1000);
+  if (thousands > 0) {
+    parts.push(`${intToWords(thousands)} thousand`);
+    n %= 1000;
+  }
+  const hundreds = Math.floor(n / 100);
+  if (hundreds > 0) {
+    parts.push(`${ONES[hundreds]} hundred`);
+    n %= 100;
+  }
+  if (n >= 20) {
+    const t = Math.floor(n / 10);
+    const o = n % 10;
+    parts.push(o === 0 ? TENS[t] : `${TENS[t]}-${ONES[o]}`);
+  } else if (n > 0) {
+    parts.push(ONES[n]);
+  }
+  return parts.join(" ");
+}
+
+// "$6.82" -> "six dollars and eighty-two cents"
+// "$2,542.20" -> "two thousand five hundred forty-two dollars and twenty cents"
+// "$0.20" -> "twenty cents"
+// "$1.00" -> "one dollar"
+// "$5" -> "five dollars"
 function speakMoney(raw: string): string {
   const cleaned = raw.replace(/[$,\s]/g, "");
   const n = parseFloat(cleaned);
   if (!Number.isFinite(n)) return raw;
   const dollars = Math.floor(n);
   const cents = Math.round((n - dollars) * 100);
-  if (cents === 0) return `${dollars} dollars`;
-  return `${dollars} dollars and ${cents} cents`;
+
+  if (dollars === 0 && cents === 0) return "zero dollars";
+  if (dollars === 0) return `${intToWords(cents)} cents`;
+  if (cents === 0) return dollars === 1 ? "one dollar" : `${intToWords(dollars)} dollars`;
+  const dWord = dollars === 1 ? "one dollar" : `${intToWords(dollars)} dollars`;
+  const cWord = cents === 1 ? "one cent" : `${intToWords(cents)} cents`;
+  return `${dWord} and ${cWord}`;
 }
 
 // Pre-process recap/briefing text so ElevenLabs reads it naturally.
-// - Money: "$6.82" -> "6 dollars and 82 cents"
+// - Money: "$6.82" -> "six dollars and eighty-two cents"
 // - Odds:  "7/2" -> "7 to 2"
 // - Finish strings: "2-1-7-5" -> "2, 1, 7, 5"
 // - Shorthand: "#3" -> "number 3", "R5" -> "Race 5"
@@ -34,7 +90,8 @@ export function sanitizeForTTS(text: string): string {
   let s = text;
 
   // Money first (before generic number handling).
-  s = s.replace(/\$\s?[\d,]+(?:\.\d{1,2})?/g, (m) => speakMoney(m));
+  // Catches: $6, $6.8, $6.82, $2,542.20, $0.20
+  s = s.replace(/\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\$\s?\d+(?:\.\d{1,2})?/g, (m) => speakMoney(m));
 
   // Morning-line odds like 7/2, 5/2, 9/5, 12/1. Avoid dates by requiring small ints.
   s = s.replace(/\b(\d{1,2})\/(\d{1,2})\b/g, "$1 to $2");
