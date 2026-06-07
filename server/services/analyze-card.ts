@@ -9,7 +9,13 @@
 import { storage } from "../storage";
 import { parseBrisnetPdf } from "./parsers/brisnet";
 import { parseEquibasePdf } from "./parsers/equibase";
-import { fuseRace, assignTier } from "./eea-fusion";
+import { fuseRace, assignTier, type Tier } from "./eea-fusion";
+import {
+  cleanConditions,
+  scoresForPicks,
+  deriveFlags,
+  computeCardConviction,
+} from "./card-finishing";
 import { getOrFetchBias, toBiasContext } from "./bias-fetcher";
 import { enrichMaiden, type EnrichmentResult } from "./maiden-enrichment";
 import { handicapRace, type HandoffConfig, type Handicap } from "./llm-handoff";
@@ -113,7 +119,11 @@ export async function analyzeCard(
   const raceRowSeeds: Omit<InsertRace, "cardId">[] = fusedRaces.map((f) => ({
     raceNumber: f.raceNumber,
     tier: "PASS",
-    conditions: f.conditions.raw,
+    conditions: cleanConditions(f.conditions.raw, {
+      surface: f.conditions.surface,
+      distance: f.conditions.distance,
+      raceRating: equiByNum.get(f.raceNumber)?.raceRating ?? null,
+    }),
     shape: f.shapeNote,
     flags: "[]",
   }));
@@ -151,6 +161,7 @@ export async function analyzeCard(
   for (const r of raceRows) raceIdByNum.set(r.raceNumber, r.id);
 
   let analyzed = 0;
+  const finalTiers: Tier[] = [];
   for (const fused of fusedRaces) {
     const raceId = raceIdByNum.get(fused.raceNumber);
     if (raceId == null) continue;
@@ -186,19 +197,40 @@ export async function analyzeCard(
     }
 
     // Persist the race-level pick + tier.
+    const flags = deriveFlags(fused, weights);
     if (handicap) {
       const picks = picksFromHandicap(handicap);
-      // Update the race row directly via storage (tier + picks + read).
+      const scores = scoresForPicks(fused, picks);
+      // Update the race row directly via storage (tier + picks + scores + read).
       storage.updateRaceFusion(raceId, {
-        whyText: handicap.executiveSummary,
         tier: handicap.tier,
         read: handicap.executiveSummary,
-        paceText: fused.shapeNote,
+        flags: JSON.stringify(flags),
         ...picks,
+        ...scores,
       });
+      finalTiers.push(handicap.tier as Tier);
       analyzed++;
     } else {
-      storage.updateRaceFusion(raceId, { tier: "PASS", read: "LLM unavailable — review manually." });
+      // No LLM: fall back to the deterministic tier + fused ranking so the card
+      // still has populated scores and conditions instead of a blank PASS.
+      const tierAssign = assignTier(fused, bankroll, weights);
+      const ranked = [...fused.horses].sort((a, b) => a.rank - b.rank);
+      const picks = {
+        winPgm: ranked[0]?.pgm ?? null, winName: ranked[0]?.name ?? null,
+        placePgm: ranked[1]?.pgm ?? null, placeName: ranked[1]?.name ?? null,
+        showPgm: ranked[2]?.pgm ?? null, showName: ranked[2]?.name ?? null,
+        fourthPgm: ranked[3]?.pgm ?? null, fourthName: ranked[3]?.name ?? null,
+      };
+      const leaderTier = (tierAssign.find((t) => t.pgm === ranked[0]?.pgm)?.tier ?? "PASS") as Tier;
+      storage.updateRaceFusion(raceId, {
+        tier: leaderTier,
+        read: "LLM unavailable — review manually.",
+        flags: JSON.stringify(flags),
+        ...picks,
+        ...scoresForPicks(fused, picks),
+      });
+      finalTiers.push(leaderTier);
     }
 
     // Persist per-horse predictions (fused figures + LLM reasoning where ranked).
@@ -231,6 +263,9 @@ export async function analyzeCard(
       });
     }
   }
+
+  // Card-level conviction from the per-race tiers.
+  storage.updateCard(card.id, { cardConviction: computeCardConviction(finalTiers) });
 
   return { cardId: card.id, racesAnalyzed: analyzed, errors };
 }
