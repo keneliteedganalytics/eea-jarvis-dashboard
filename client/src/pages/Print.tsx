@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueries } from "@tanstack/react-query";
+import { useRoute } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import "../print.css";
 
@@ -158,10 +159,16 @@ function RaceBlock({
 }
 
 export default function Print() {
+  // `/print/:id` prints a specific (e.g. archived) card; bare `/print` prints
+  // the latest active card.
+  const [, params] = useRoute("/print/:id");
+  const explicitId = params?.id ? Number(params.id) : undefined;
+
   const { data: latest } = useQuery<{ id: number }>({
     queryKey: ["/api/cards/latest"],
+    enabled: explicitId == null,
   });
-  const cardId = latest?.id;
+  const cardId = explicitId ?? latest?.id;
 
   const { data: card, isLoading } = useQuery<PrintCard>({
     queryKey: [`/api/cards/${cardId}/print`],

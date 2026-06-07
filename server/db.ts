@@ -186,6 +186,15 @@ CREATE TABLE IF NOT EXISTS prediction_history (
   voice_conversation_id INTEGER,
   created_at INTEGER NOT NULL
 );
+
+-- Anthropic-generated printable race summaries (one row per race). Missing
+-- this table is what crashed GET /api/cards/:id/print with a 500.
+CREATE TABLE IF NOT EXISTS race_summaries (
+  race_id INTEGER PRIMARY KEY,
+  summary TEXT NOT NULL,
+  eea_version INTEGER,
+  generated_at INTEGER NOT NULL
+);
 `);
 
 // Idempotent settings-column migration for installs that predate EEA v1.
@@ -207,6 +216,19 @@ addCol("tier_share_sniper", "tier_share_sniper REAL NOT NULL DEFAULT 0.35");
 addCol("tier_share_edge", "tier_share_edge REAL NOT NULL DEFAULT 0.20");
 addCol("tier_share_dual", "tier_share_dual REAL NOT NULL DEFAULT 0.12");
 addCol("tier_share_recon", "tier_share_recon REAL NOT NULL DEFAULT 0.08");
+
+// Idempotent cards-column migration for the Historical archive. Existing rows
+// inherit status='active'; archived_at is nullable and set by the sweep.
+const cardsCols = new Set(
+  (sqlite.prepare("PRAGMA table_info(cards)").all() as { name: string }[]).map(
+    (c) => c.name,
+  ),
+);
+const addCardCol = (name: string, ddl: string) => {
+  if (!cardsCols.has(name)) sqlite.exec(`ALTER TABLE cards ADD COLUMN ${ddl}`);
+};
+addCardCol("status", "status TEXT NOT NULL DEFAULT 'active'");
+addCardCol("archived_at", "archived_at TEXT");
 
 export const db = drizzle(sqlite);
 export { sqlite };

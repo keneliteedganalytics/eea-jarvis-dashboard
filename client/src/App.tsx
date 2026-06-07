@@ -18,6 +18,8 @@ import Results from "@/pages/Results";
 import Analytics from "@/pages/Analytics";
 import Settings from "@/pages/Settings";
 import Print from "@/pages/Print";
+import Historical from "@/pages/Historical";
+import HistoricalCard from "@/pages/HistoricalCard";
 
 function AppRouter() {
   return (
@@ -27,6 +29,8 @@ function AppRouter() {
       <Route path="/race/:n" component={RaceDetail} />
       <Route path="/results" component={Results} />
       <Route path="/analytics" component={Analytics} />
+      <Route path="/historical" component={Historical} />
+      <Route path="/historical/:id" component={HistoricalCard} />
       <Route path="/settings" component={Settings} />
       <Route component={NotFound} />
     </Switch>
@@ -38,6 +42,7 @@ function Shell() {
   return (
     <Switch>
       {/* Standalone printable page — no app chrome, no Jarvis player. */}
+      <Route path="/print/:id" component={Print} />
       <Route path="/print" component={Print} />
       <Route>
         <AppLayout>

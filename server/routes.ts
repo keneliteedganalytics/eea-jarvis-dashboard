@@ -17,7 +17,7 @@ import {
 import type { Card, Settings } from "@shared/schema";
 import { z } from "zod";
 import { analyzeCard } from "./services/analyze-card";
-import { backfillNullScoreCards } from "./services/card-finishing";
+import { backfillNullScoreCards, sweepArchive } from "./services/card-finishing";
 import { getOrFetchBias, fetchBias } from "./services/bias-fetcher";
 import { sizeRaceBets } from "./services/bet-sizer";
 import { getOrGenerateRaceSummary } from "./services/race-summary";
@@ -53,11 +53,31 @@ export async function registerRoutes(
   // Repair any older cards persisted with null numeric scores (e.g. the
   // Finger Lakes card) by reconstructing scores from their prediction rows.
   backfillNullScoreCards(storage);
+  // Auto-archive past cards at boot, then sweep hourly. Idempotent.
+  sweepArchive(storage);
+  setInterval(() => sweepArchive(storage), 60 * 60 * 1000).unref();
   startPoller();
 
   // ── Cards ────────────────────────────────────────────────────────────────
-  app.get("/api/cards", (_req, res) => {
-    res.json(storage.getCards());
+  // Default to active cards only so the main dashboard never shows past cards.
+  // `?includeArchived=true` returns everything (active + archived).
+  app.get("/api/cards", (req, res) => {
+    const includeArchived = req.query.includeArchived === "true";
+    res.json(includeArchived ? storage.getCards() : storage.getActiveCards());
+  });
+
+  // ── Historical archive ─────────────────────────────────────────────────────
+  // Archived cards grouped by track (tracks A→Z, cards newest-first).
+  app.get("/api/cards/archived", (_req, res) => {
+    res.json(storage.getArchivedCardsGrouped());
+  });
+
+  // Full archived card detail (read-only — same shape as an active card).
+  app.get("/api/cards/archived/:id", (req, res) => {
+    const id = Number(req.params.id);
+    const card = storage.getArchivedCardById(id);
+    if (!card) return res.status(404).json({ error: "Archived card not found" });
+    res.json(card);
   });
 
   app.get("/api/cards/latest", (_req, res) => {
@@ -245,35 +265,40 @@ export async function registerRoutes(
   // page). Race summaries are fetched separately/in parallel so the page can
   // render immediately and fill summaries in as they generate.
   app.get("/api/cards/:id/print", (req, res) => {
-    const id = Number(req.params.id);
-    const card = storage.getCardWithRaces(id);
-    if (!card) return res.status(404).json({ error: "Card not found" });
-    const settings = storage.getSettings();
-    const racesOnCard = card.races.length;
-    const dailyCap = settings.bankroll * settings.dailyRiskCapPct;
-    const races = card.races.map((r) => {
-      const top = [r.winPgm, r.placePgm, r.showPgm, r.fourthPgm].filter(
-        (p): p is string => !!p,
-      );
-      const bets = sizeRaceBets({
-        tier: r.tier,
-        racesOnCard,
-        settings: { bankroll: settings.bankroll, dailyRiskCapPct: settings.dailyRiskCapPct },
-        top,
+    try {
+      const id = Number(req.params.id);
+      const card = storage.getCardWithRaces(id);
+      if (!card) return res.status(404).json({ error: "Card not found" });
+      const settings = storage.getSettings();
+      const racesOnCard = card.races.length;
+      const dailyCap = settings.bankroll * settings.dailyRiskCapPct;
+      const races = card.races.map((r) => {
+        const top = [r.winPgm, r.placePgm, r.showPgm, r.fourthPgm].filter(
+          (p): p is string => !!p,
+        );
+        const bets = sizeRaceBets({
+          tier: r.tier,
+          racesOnCard,
+          settings: { bankroll: settings.bankroll, dailyRiskCapPct: settings.dailyRiskCapPct },
+          top,
+        });
+        const cached = storage.getRaceSummary(r.id);
+        return { ...r, bets, summary: cached?.summary ?? null };
       });
-      const cached = storage.getRaceSummary(r.id);
-      return { ...r, bets, summary: cached?.summary ?? null };
-    });
-    res.json({
-      ...card,
-      races,
-      sizing: {
-        bankroll: settings.bankroll,
-        dailyRiskCapPct: settings.dailyRiskCapPct,
-        dailyCap,
-        racesOnCard,
-      },
-    });
+      res.json({
+        ...card,
+        races,
+        sizing: {
+          bankroll: settings.bankroll,
+          dailyRiskCapPct: settings.dailyRiskCapPct,
+          dailyCap,
+          racesOnCard,
+        },
+      });
+    } catch (e) {
+      console.error(`[print] failed to build print payload for card ${req.params.id}:`, e);
+      res.status(500).json({ error: (e as Error).message });
+    }
   });
 
   // Generate (or return cached) Anthropic 2-3 sentence race summary.

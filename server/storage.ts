@@ -25,6 +25,7 @@ import type {
   InsertRace,
   RaceWithResult,
   CardWithRaces,
+  ArchivedCardsGrouped,
   PpUpload,
   InsertPpUpload,
   Prediction,
@@ -52,6 +53,7 @@ import { DEFAULT_WEIGHTS, PERSONA_V1 } from "./services/eea-config";
 export interface IStorage {
   // Cards
   getCards(): Card[];
+  getActiveCards(): Card[];
   getCard(id: number): Card | undefined;
   getLatestCard(): CardWithRaces | undefined;
   getCardWithRaces(id: number): CardWithRaces | undefined;
@@ -59,6 +61,9 @@ export interface IStorage {
   updateCard(id: number, patch: Partial<Card>): Card | undefined;
   deleteCard(id: number): void;
   getLockedCards(): Card[];
+  archiveCard(id: number, archivedAt: string): Card | undefined;
+  getArchivedCardsGrouped(): ArchivedCardsGrouped;
+  getArchivedCardById(id: number): CardWithRaces | undefined;
 
   // Races
   getRace(id: number): Race | undefined;
@@ -203,6 +208,58 @@ export class DatabaseStorage implements IStorage {
 
   getLockedCards(): Card[] {
     return db.select().from(cards).where(eq(cards.locked, true)).all();
+  }
+
+  // ── Archive ───────────────────────────────────────────────────────────────
+  getActiveCards(): Card[] {
+    return db.select().from(cards).where(eq(cards.status, "active")).all();
+  }
+
+  archiveCard(id: number, archivedAt: string): Card | undefined {
+    db.update(cards)
+      .set({ status: "archived", archivedAt })
+      .where(eq(cards.id, id))
+      .run();
+    return this.getCard(id);
+  }
+
+  // All archived cards, grouped by track. Tracks sorted A→Z; cards within a
+  // track sorted by race date DESC (newest first).
+  getArchivedCardsGrouped(): ArchivedCardsGrouped {
+    const archived = db
+      .select()
+      .from(cards)
+      .where(eq(cards.status, "archived"))
+      .all();
+    const byTrack = new Map<string, typeof archived>();
+    for (const c of archived) {
+      const list = byTrack.get(c.track) ?? [];
+      list.push(c);
+      byTrack.set(c.track, list);
+    }
+    const tracks = Array.from(byTrack.keys()).sort((a, b) => a.localeCompare(b)).map((track) => {
+      const list = byTrack
+        .get(track)!
+        .slice()
+        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+      return {
+        track,
+        cards: list.map((c) => ({
+          id: c.id,
+          date: c.date,
+          raceCount: this.getRacesByCard(c.id).length,
+          cardConviction: c.cardConviction,
+          archivedAt: c.archivedAt,
+        })),
+      };
+    });
+    return { tracks };
+  }
+
+  getArchivedCardById(id: number): CardWithRaces | undefined {
+    const card = this.getCard(id);
+    if (!card || card.status !== "archived") return undefined;
+    return this.withRaces(card);
   }
 
   // ── Races ───────────────────────────────────────────────────────────────
