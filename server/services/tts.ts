@@ -93,6 +93,37 @@ export function sanitizeForTTS(text: string): string {
   // Catches: $6, $6.8, $6.82, $2,542.20, $0.20
   s = s.replace(/\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\$\s?\d+(?:\.\d{1,2})?/g, (m) => speakMoney(m));
 
+  // ---- DISTANCES (run before odds so 1/16 in "1 1/16M" doesn't become "1 to 16M") ----
+  // Unicode fractions seen on race cards.
+  s = s.replace(/½/g, " and a half");
+  s = s.replace(/¼/g, " and a quarter");
+  s = s.replace(/¾/g, " and three quarters");
+  s = s.replace(/⅛/g, " and an eighth");
+  s = s.replace(/⅜/g, " and three eighths");
+  s = s.replace(/⅝/g, " and five eighths");
+  s = s.replace(/⅞/g, " and seven eighths");
+
+  // Compound mile distances: "1 1/16M" -> "one and one sixteenth miles",
+  // "1 1/8M" -> "one and one eighth miles", "1 3/8M" -> "one and three eighths miles".
+  const fractionWord: Record<string, string> = {
+    "1/16": "one sixteenth", "1/8": "one eighth", "1/4": "a quarter",
+    "3/16": "three sixteenths", "5/16": "five sixteenths", "3/8": "three eighths",
+    "7/16": "seven sixteenths", "1/2": "a half", "9/16": "nine sixteenths",
+    "5/8": "five eighths", "11/16": "eleven sixteenths", "3/4": "three quarters",
+    "13/16": "thirteen sixteenths", "7/8": "seven eighths", "15/16": "fifteen sixteenths",
+  };
+  s = s.replace(/\b(\d)\s+(\d{1,2}\/\d{1,2})\s*M\b/gi, (_m, whole, frac) => {
+    const w = fractionWord[frac];
+    if (!w) return `${whole} ${frac} miles`;
+    return `${whole === "1" ? "one" : whole} and ${w} miles`;
+  });
+  // Bare "1M" / "2M" / "1.5M" without a fraction prefix.
+  s = s.replace(/\b(\d+(?:\.\d+)?)\s*M\b(?!\w)/g, (_m, n) => (n === "1" ? "one mile" : `${n} miles`));
+
+  // Furlongs: "6F" / "6f" / "5.5F" / "5 and a half F" -> "6 furlongs".
+  s = s.replace(/\b(\d+(?:\.\d+)?)(?:\s+and\s+(?:a|an|three|five|seven)\s+(?:half|quarter|quarters|eighth|eighths|sixteenths?))?\s*F\b(?!\w)/gi,
+    (m, _n) => `${m.slice(0, -1).trimEnd()} furlongs`);
+
   // Morning-line odds like 7/2, 5/2, 9/5, 12/1. Avoid dates by requiring small ints.
   s = s.replace(/\b(\d{1,2})\/(\d{1,2})\b/g, "$1 to $2");
 
@@ -107,6 +138,7 @@ export function sanitizeForTTS(text: string): string {
   s = s.replace(/\bR(\d{1,2})\b/g, "Race $1");
 
   // Tier / grade / handicapping abbreviations. Word-boundary safe.
+  s = s.replace(/\bRR\s*(\d+)/g, "race rating $1");
   s = s.replace(/\bML\b/g, "morning line");
   s = s.replace(/\bPP\b/g, "post position");
   s = s.replace(/\bSPD\b/g, "speed");
@@ -131,14 +163,26 @@ export function sanitizeForTTS(text: string): string {
   s = s.replace(/\bDUAL\b/g, "Dual");
   s = s.replace(/\bPASS\b/g, "pass");
 
-  // Common track / chart shorthand. "6f" / "5.5f" -> "6 furlongs".
-  s = s.replace(/\b(\d+(?:\.\d+)?)f\b/g, "$1 furlongs");
+  // Class / race-type shorthand (after distance handling so "M" suffix is already gone).
   s = s.replace(/\bMSW\b/g, "maiden special weight");
   s = s.replace(/\bMCL\b/g, "maiden claiming");
   s = s.replace(/\bAOC\b/g, "allowance optional claiming");
+  s = s.replace(/\bAlw\b/gi, "allowance");
+  s = s.replace(/\bMdn\b/gi, "maiden");
+  s = s.replace(/\bMCl\b/g, "maiden claiming");
+  s = s.replace(/\bOptClm\b/gi, "optional claiming");
+  s = s.replace(/\bClm\b/gi, "claiming");
   s = s.replace(/\bN1X\b/g, "non-winners one other than");
   s = s.replace(/\bN2X\b/g, "non-winners two other than");
+  s = s.replace(/\bN3X\b/g, "non-winners three other than");
   s = s.replace(/\bSTK\b/g, "stakes");
+  s = s.replace(/\bS\.(?=\s*\()/g, "Stakes");                    // "Poker S. (G3)" -> "Poker Stakes (G3)"
+  s = s.replace(/\b(\d+)YO\b/g, "$1 year olds");                  // "2YO" -> "2 year olds"
+  s = s.replace(/\bF&M\b/g, "fillies and mares");
+  s = s.replace(/\b(\d+)\s*UP\b/g, "$1 and up");                  // "3UP" -> "3 and up"
+
+  // Purse shorthand: "105k" -> "105 thousand" (after money + distance so no conflict).
+  s = s.replace(/\b(\d+(?:\.\d+)?)k\b/g, "$1 thousand");
 
   // Tighten whitespace.
   s = s.replace(/\s+/g, " ").trim();
