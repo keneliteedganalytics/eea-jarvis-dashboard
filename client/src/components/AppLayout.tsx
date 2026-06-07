@@ -9,6 +9,7 @@ import {
   Crosshair,
   ClipboardCheck,
   TrendingUp,
+  Archive,
   Settings as SettingsIcon,
   Menu,
 } from "lucide-react";
@@ -20,6 +21,7 @@ const NAV = [
   { href: "/race/1", label: "Race Detail", icon: Crosshair, testid: "nav-race", match: "/race" },
   { href: "/results", label: "Results", icon: ClipboardCheck, testid: "nav-results" },
   { href: "/analytics", label: "Analytics", icon: TrendingUp, testid: "nav-analytics" },
+  { href: "/historical", label: "Historical", icon: Archive, testid: "nav-historical", match: "/historical" },
   { href: "/settings", label: "Settings", icon: SettingsIcon, testid: "nav-settings" },
 ];
 

@@ -226,3 +226,23 @@ export function backfillNullScoreCards(storage: IStorage): number {
   }
   return repaired;
 }
+
+// Auto-archive any active card whose race day is in the past. The race `date`
+// is a plain YYYY-MM-DD string, so comparing against today's UTC day string
+// avoids tz drift at midnight. Idempotent: only touches status='active' cards
+// with date < today, so it's safe to run at boot and on an hourly interval.
+// Returns the number of cards archived.
+export function sweepArchive(storage: IStorage, now: Date = new Date()): number {
+  const today = now.toISOString().slice(0, 10);
+  let archived = 0;
+  for (const card of storage.getActiveCards()) {
+    if (card.date < today) {
+      storage.archiveCard(card.id, now.toISOString());
+      archived++;
+    }
+  }
+  if (archived > 0) {
+    console.log(`[archive] auto-archived ${archived} past card(s)`);
+  }
+  return archived;
+}

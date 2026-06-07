@@ -11,6 +11,8 @@ export const cards = sqliteTable("cards", {
   cardConviction: text("card_conviction"), // HIGH / MEDIUM / LOW
   notes: text("notes"),
   locked: integer("locked", { mode: "boolean" }).notNull().default(false),
+  status: text("status", { enum: ["active", "archived"] }).notNull().default("active"),
+  archivedAt: text("archived_at"), // ISO timestamp, set when auto-archived
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -299,6 +301,22 @@ export type AudioCache = typeof audioCache.$inferSelect;
 
 export type RaceWithResult = Race & { result?: Result | null };
 export type CardWithRaces = Card & { races: RaceWithResult[] };
+
+// ── Historical archive ────────────────────────────────────────────────────
+export interface ArchivedCardSummary {
+  id: number;
+  date: string;
+  raceCount: number;
+  cardConviction: string | null;
+  archivedAt: string | null;
+}
+export interface ArchivedTrackGroup {
+  track: string;
+  cards: ArchivedCardSummary[];
+}
+export interface ArchivedCardsGrouped {
+  tracks: ArchivedTrackGroup[];
+}
 
 // ── EEA v1 insert schemas + types ─────────────────────────────────────────
 export const insertPpUploadSchema = createInsertSchema(ppUploads).omit({ id: true });
