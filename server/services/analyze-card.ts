@@ -9,7 +9,7 @@
 import { storage } from "../storage";
 import { parseBrisnetPdf } from "./parsers/brisnet";
 import { parseEquibasePdf } from "./parsers/equibase";
-import { fuseRace, assignTier, type Tier } from "./eea-fusion";
+import { fuseRace, assignTierV2, type Tier } from "./eea-fusion";
 import {
   cleanConditions,
   scoresForPicks,
@@ -270,8 +270,12 @@ export async function analyzeCard(
       }
     }
 
-    // Deterministic tier (advisory) before the LLM.
-    const tierAssign = assignTier(fused, bankroll, weights);
+    // Deterministic tier (advisory) before the LLM. assignTierV2 also returns
+    // the v2 tuning rules' race-level flags (A1-A5) which we fold into the
+    // persisted flags[] so the deep postmortem can grade them.
+    const tierV2 = assignTierV2(fused, bankroll, weights);
+    const tierAssign = tierV2.tiers;
+    const v2RaceFlags = tierV2.raceFlags;
     const tierByPgm = new Map(tierAssign.map((t) => [t.pgm, t]));
 
     onProgress(`Calling LLM (race ${fused.raceNumber})`);
@@ -287,8 +291,9 @@ export async function analyzeCard(
       errors.push(`Race ${fused.raceNumber} LLM failed: ${(e as Error).message}`);
     }
 
-    // Persist the race-level pick + tier.
-    const flags = deriveFlags(fused, weights);
+    // Persist the race-level pick + tier. Fold the v2 tuning flags (A1-A5) in
+    // alongside the existing derived flags.
+    const flags = [...deriveFlags(fused, weights), ...v2RaceFlags];
     if (handicap) {
       const rawPicks = picksFromHandicap(handicap);
       // Postmortem fixes (Card 1 Saratoga 2026-06-07): tighten EDGE class flips,
@@ -312,8 +317,8 @@ export async function analyzeCard(
       analyzed++;
     } else {
       // No LLM: fall back to the deterministic tier + fused ranking so the card
-      // still has populated scores and conditions instead of a blank PASS.
-      const tierAssign = assignTier(fused, bankroll, weights);
+      // still has populated scores and conditions instead of a blank PASS. Reuse
+      // the v2 tier assignment computed above (carries A1-A5).
       const ranked = [...fused.horses].sort((a, b) => a.rank - b.rank);
       const picks = {
         winPgm: ranked[0]?.pgm ?? null, winName: ranked[0]?.name ?? null,

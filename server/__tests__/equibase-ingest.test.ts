@@ -159,10 +159,12 @@ describe("loginEquibase redirect-chain cookie capture", () => {
   }
 
   it("captures Set-Cookie that arrives on the 302 hop, not the final 200", async () => {
-    // Hop 0: POST -> 302 with CFID/CFTOKEN on the redirect, Location to landing.
-    // Hop 1: GET landing -> 200 with JSESSIONID and no further redirect.
+    // Call 0: GET the login form -> seeds the Incapsula/CMP cookies.
+    // Call 1: POST the action -> 302 with CFID/CFTOKEN on the redirect.
+    // Call 2: GET landing -> 200 with JSESSIONID and no further redirect.
     const fetchMock = vi
       .fn<typeof fetch>()
+      .mockResolvedValueOnce(makeResponse(200, ["COOKIE_TEST=1; path=/"]))
       .mockResolvedValueOnce(
         makeResponse(
           302,
@@ -180,22 +182,32 @@ describe("loginEquibase redirect-chain cookie capture", () => {
     expect(jar.get("CFTOKEN")).toBe("abcdef0123");
     expect(jar.get("JSESSIONID")).toBe("ZZZ");
 
-    // Second hop must carry the cookies gathered on the first hop.
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const secondInit = fetchMock.mock.calls[1][1] as RequestInit;
-    expect((secondInit.headers as Record<string, string>).Cookie).toContain(
+    // GET form + POST action + one redirect GET = 3 calls.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    // The POST action (call 1) carries the cookies seeded by the GET form.
+    const postInit = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(postInit.method).toBe("POST");
+    expect((postInit.headers as Record<string, string>).Cookie).toContain(
+      "COOKIE_TEST=1",
+    );
+    // The redirect hop (call 2) carries the cookies gathered so far + is a GET.
+    const redirectInit = fetchMock.mock.calls[2][1] as RequestInit;
+    expect((redirectInit.headers as Record<string, string>).Cookie).toContain(
       "CFID=12345",
     );
-    expect(secondInit.method).toBe("GET");
+    expect(redirectInit.method).toBe("GET");
   });
 
   it("sends a browser User-Agent on the login POST", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
+      .mockResolvedValueOnce(makeResponse(200, ["COOKIE_TEST=1; path=/"]))
       .mockResolvedValueOnce(makeResponse(200, ["CFID=1; path=/"]));
     vi.stubGlobal("fetch", fetchMock);
     await loginEquibase("user", "pass");
-    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    // Call 1 is the credential POST; assert the browser UA on it.
+    const init = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(init.method).toBe("POST");
     const ua = (init.headers as Record<string, string>)["User-Agent"];
     expect(ua).toContain("Chrome/");
     expect(ua).not.toContain("EEA-Dashboard");
@@ -204,6 +216,7 @@ describe("loginEquibase redirect-chain cookie capture", () => {
   it("throws when no session cookie is set across any hop", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
+      .mockResolvedValueOnce(makeResponse(200, ["COOKIE_TEST=1; path=/"]))
       .mockResolvedValueOnce(makeResponse(200, ["foo=bar; path=/"]));
     vi.stubGlobal("fetch", fetchMock);
     await expect(loginEquibase("user", "pass")).rejects.toThrow(
@@ -212,9 +225,11 @@ describe("loginEquibase redirect-chain cookie capture", () => {
   });
 
   it("stops following redirects after MAX_LOGIN_HOPS", async () => {
-    // Always 302 to itself, never setting a session cookie -> must terminate.
+    // GET form first, then the POST/redirects always 302 to a non-error loop
+    // target, never setting a session cookie -> must terminate.
     const fetchMock = vi
       .fn<typeof fetch>()
+      .mockResolvedValueOnce(makeResponse(200, ["COOKIE_TEST=1; path=/"]))
       .mockResolvedValue(
         makeResponse(302, [], "https://www.equibase.com/premium/loop.cfm"),
       );
@@ -222,8 +237,8 @@ describe("loginEquibase redirect-chain cookie capture", () => {
     await expect(loginEquibase("user", "pass")).rejects.toThrow(
       /did not set a session cookie/,
     );
-    // 1 POST + up to MAX_LOGIN_HOPS GETs; never unbounded.
-    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(6);
+    // 1 GET form + 1 POST + up to MAX_LOGIN_HOPS GETs; never unbounded.
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(7);
   });
 });
 

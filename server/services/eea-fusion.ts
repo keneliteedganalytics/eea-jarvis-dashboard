@@ -448,11 +448,439 @@ export function fuseRace(
   };
 }
 
+// ── Fusion tier-tuning v2 (PR #27) ───────────────────────────────────────────
+// Today's Finger Lakes deep postmortem isolated five tier-assignment failure
+// modes — the soft/middle tiers were being used "as a hiding place when we
+// don't have conviction". These rules tighten how RATINGS translate to TIERS;
+// they never touch the underlying figure math (composites / eeaRating).
+//
+// They operate on a small, explicit per-horse `FusionFactors` record so each
+// rule is independently unit-testable. `deriveFusionFactors` builds that record
+// from what fusion already produces (flags, bloodstock fit, pace shape, class
+// composites) so the live path (assignTier) can call the rules with real data.
+
+// Pace running style. "unclear" when fusion can't separate the horse.
+export type PaceRole = "E" | "EP" | "P" | "S" | "unclear";
+// Letter fit grade for surface or distance aptitude (bloodstock-derived).
+export type FitGrade = "A" | "B" | "C" | "D" | "F";
+// Class trend over the recent form: improving (+), flat (=), declining (-).
+export type ClassTrend = "+" | "=" | "-";
+
+// The structured, per-horse handicapping factors the v2 tier rules read. Every
+// field is optional/nullable so a thin card degrades gracefully — a horse with
+// none of these is exactly the "lazy bucket" A5 is meant to catch.
+export interface FusionFactors {
+  // (A1a) Trip-context flags logged in the last 3 starts that SUPPORT the
+  // rating (e.g. "needed lone speed", "wide trip last", "key trip recovery").
+  tripContextFlags: string[];
+  // (A1b) The pace role we logged for the horse, matched against race shape.
+  paceRole: PaceRole;
+  // (A1c) Has the horse EARNED class within its last 3 starts at or above the
+  // current condition's class level?
+  earnedClassAtLevel: boolean;
+  // Letter grades for surface / distance fit (bloodstock-derived). Null = not
+  // graded (no recognizable pedigree / unknown distance).
+  surfaceFitGrade: FitGrade | null;
+  distanceFitGrade: FitGrade | null;
+  // Bloodstock "chips": did the pedigree give a positive surface / distance read?
+  bloodstockSurfaceYes: boolean;
+  bloodstockDistanceYes: boolean;
+  // Class trend over recent form. Null = unknown.
+  classTrend: ClassTrend | null;
+  // Numeric pace-fit score (shape-adjusted pace), surfaced for the A3 cluster
+  // re-sort. Falls back to raw eeap when eeapFit is absent.
+  paceFit: number | null;
+}
+
+// Map a 0-100 bloodstock sub-fit to a letter grade (A best … F worst). Neutral
+// 50 lands at C. Null in → null out (ungraded).
+function fitGrade(value: number | null | undefined): FitGrade | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  if (value >= 70) return "A";
+  if (value >= 58) return "B";
+  if (value >= 45) return "C";
+  if (value >= 35) return "D";
+  return "F";
+}
+
+// Does a fit grade count as "positive" (a real plus, not neutral/negative)?
+function isPositiveGrade(g: FitGrade | null): boolean {
+  return g === "A" || g === "B";
+}
+
+// Derive the per-horse FusionFactors map for a race from fusion output. The
+// engine doesn't carry per-start past-performance lines, so trip-context and
+// earned-class are inferred from the structured signals fusion DOES produce:
+//   • lone-speed / pace-duel flags → trip context + pace role
+//   • bloodstock surfaceFit/distanceFit → fit grades + chips
+//   • eeac vs the field's class spread → a coarse class trend
+// A future PR that lands true PP trip/class history can populate these directly
+// without touching the rule functions.
+export function deriveFusionFactors(fused: FusedRace): Map<string, FusionFactors> {
+  const out = new Map<string, FusionFactors>();
+  const paceVals = fused.horses
+    .map((h) => h.eeapFit ?? h.eeap)
+    .filter((v): v is number => v != null);
+  const maxPace = paceVals.length ? Math.max(...paceVals) : null;
+  const classVals = fused.horses
+    .map((h) => h.eeac)
+    .filter((v): v is number => v != null);
+  const medianClass = median(classVals);
+
+  for (const h of fused.horses) {
+    const pace = h.eeapFit ?? h.eeap;
+    const isEarly = h.flags.includes("projected-lone-speed") || h.flags.includes("in-pace-duel");
+    let paceRole: PaceRole = "unclear";
+    if (maxPace != null && pace != null) {
+      if (pace >= maxPace - 1) paceRole = "E";
+      else if (pace >= maxPace - 4) paceRole = "EP";
+      else if (pace >= maxPace - 8) paceRole = "P";
+      else paceRole = "S";
+    }
+
+    const tripContextFlags: string[] = [];
+    if (h.flags.includes("projected-lone-speed")) tripContextFlags.push("needed lone speed");
+    if (h.flags.includes("wet-track-boost")) tripContextFlags.push("proven off-track");
+
+    // Bloodstock-derived fit grades + chips.
+    const surf = h.bloodstockAdjustment;
+    const surfaceFitGrade =
+      surf.applied || surf.confidence !== "none"
+        ? fitGrade(compositeSurface(surf))
+        : null;
+    const distanceFitGrade =
+      surf.applied || surf.confidence !== "none"
+        ? fitGrade(compositeDistance(surf))
+        : null;
+    const bloodstockSurfaceYes = surf.reasonCodes.some((c) => /sire-(turf|dirt)/.test(c));
+    const bloodstockDistanceYes = surf.reasonCodes.some((c) => /sire-(sprint|route)/.test(c));
+
+    // Coarse class trend: above the field median class = improving lean.
+    let classTrend: ClassTrend | null = null;
+    if (h.eeac != null && medianClass != null) {
+      if (h.eeac >= medianClass + 3) classTrend = "+";
+      else if (h.eeac <= medianClass - 3) classTrend = "-";
+      else classTrend = "=";
+    }
+
+    // earned-class proxy: a top-half class figure AND not a declining trend.
+    const earnedClassAtLevel =
+      h.eeac != null && medianClass != null && h.eeac >= medianClass && classTrend !== "-";
+
+    out.set(h.pgm, {
+      tripContextFlags,
+      paceRole,
+      earnedClassAtLevel,
+      surfaceFitGrade,
+      distanceFitGrade,
+      bloodstockSurfaceYes,
+      bloodstockDistanceYes,
+      classTrend,
+      paceFit: pace ?? null,
+    });
+    void isEarly;
+  }
+  return out;
+}
+
+// The bloodstock composite doesn't expose surface/distance sub-fits on the
+// FusedHorse adjustment (only the blended composite), so approximate the sub-
+// grade from the composite + reason codes: a strong surface/distance reason
+// lifts the grade above the composite floor.
+function compositeSurface(adj: BloodstockAdjustment): number {
+  let base = adj.composite;
+  if (adj.reasonCodes.some((c) => /sire-(turf|dirt)/.test(c))) base = Math.max(base, 70);
+  return base;
+}
+function compositeDistance(adj: BloodstockAdjustment): number {
+  let base = adj.composite;
+  if (adj.reasonCodes.some((c) => /sire-(sprint|route)/.test(c))) base = Math.max(base, 70);
+  return base;
+}
+
+function median(xs: number[]): number | null {
+  if (xs.length === 0) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+// Default-empty factors so callers can ask a rule about a horse we have no
+// structured read on (the A5 "lazy bucket" case).
+export function emptyFactors(): FusionFactors {
+  return {
+    tripContextFlags: [],
+    paceRole: "unclear",
+    earnedClassAtLevel: false,
+    surfaceFitGrade: null,
+    distanceFitGrade: null,
+    bloodstockSurfaceYes: false,
+    bloodstockDistanceYes: false,
+    classTrend: null,
+    paceFit: null,
+  };
+}
+
+// ── A1. Earned-class gate on DUAL ─────────────────────────────────────────────
+// A horse may only hold DUAL TOP if at least one of:
+//   (a) a logged trip-context flag in the last 3 starts supports the rating,
+//   (b) the race's pace shape matches a logged pace role for the horse,
+//   (c) earned class within the last 3 starts at/above the current class level.
+// Otherwise the DUAL slot is not earned and the horse is downgraded.
+export function canQualifyAsDual(
+  _horse: FusedHorse,
+  fused: FusedRace,
+  factors: FusionFactors,
+): boolean {
+  const a = factors.tripContextFlags.length > 0;
+  const b = paceRoleMatchesShape(factors.paceRole, fused.shapeNote);
+  const c = factors.earnedClassAtLevel;
+  return a || b || c;
+}
+
+// Does a logged pace role pay off in this race's projected shape? Lone-E in a
+// paceless race, or a closer (S/P) when the pace is contested/hot, are the
+// canonical "shape matches role" cases.
+function paceRoleMatchesShape(role: PaceRole, shapeNote: string): boolean {
+  const shape = shapeNote.toLowerCase();
+  const loneSpeed = shape.includes("lone speed");
+  const contested = shape.includes("contested");
+  if ((role === "E" || role === "EP") && loneSpeed) return true;
+  if ((role === "S" || role === "P") && contested) return true;
+  return false;
+}
+
+// ── A2. Rating-gap penalty on thin top picks ──────────────────────────────────
+// When #1 leads #2 by more than RATING_GAP_THRESHOLD rating points AND #1 has
+// NOT earned class for that figure (no recent start at the rating's class
+// level), the gap is a WARNING, not conviction → drop the tier one notch.
+export const RATING_GAP_THRESHOLD = 15;
+
+export function ratingGapPenalty(
+  tier: Tier,
+  leader: FusedHorse | undefined,
+  second: FusedHorse | undefined,
+  leaderFactors: FusionFactors,
+): { tier: Tier; applied: boolean } {
+  if (
+    leader?.eeaRating == null ||
+    second?.eeaRating == null ||
+    leader.eeaRating - second.eeaRating <= RATING_GAP_THRESHOLD ||
+    leaderFactors.earnedClassAtLevel
+  ) {
+    return { tier, applied: false };
+  }
+  return { tier: demoteOne(tier), applied: true };
+}
+
+// One-notch demotion ladder for the v2 rules (matches postmortem-adjustments):
+// SNIPER→EDGE→DUAL→RECON→PASS. (A2 spec lists SNIPER→EDGE, EDGE→DUAL, DUAL→RECON.)
+const V2_DEMOTE: Record<Tier, Tier> = {
+  SNIPER: "EDGE",
+  EDGE: "DUAL",
+  DUAL: "RECON",
+  RECON: "PASS",
+  PASS: "PASS",
+};
+export function demoteOne(tier: Tier): Tier {
+  return V2_DEMOTE[tier];
+}
+
+// ── A3. PASS-tier compression ─────────────────────────────────────────────────
+// When 3+ horses sit within RATING_CLUSTER_BAND points of each other inside the
+// PASS bucket, re-sort that cluster by a non-rating composite (pace fit +
+// bloodstock surface fit + bloodstock distance fit). The top of the cluster, if
+// it owns at least one positive non-rating factor, is promoted to RECON.
+export const RATING_CLUSTER_BAND = 4;
+
+export interface CompressionPromotion {
+  pgm: string;
+  compositeScore: number;
+}
+
+// Non-rating composite for the A3 re-sort. Pace fit is normalized to a small
+// band so it doesn't dwarf the binary bloodstock chips.
+function nonRatingComposite(f: FusionFactors): number {
+  let score = 0;
+  if (f.paceFit != null) score += (f.paceFit - 50) / 10; // ~ -5..+5 contribution
+  if (f.bloodstockSurfaceYes) score += 1;
+  if (f.bloodstockDistanceYes) score += 1;
+  if (isPositiveGrade(f.surfaceFitGrade)) score += 0.5;
+  if (isPositiveGrade(f.distanceFitGrade)) score += 0.5;
+  return Math.round(score * 100) / 100;
+}
+
+// A horse has at least one positive non-rating factor (the promotion gate).
+function hasPositiveNonRatingFactor(f: FusionFactors): boolean {
+  return (
+    f.bloodstockSurfaceYes ||
+    f.bloodstockDistanceYes ||
+    isPositiveGrade(f.surfaceFitGrade) ||
+    isPositiveGrade(f.distanceFitGrade) ||
+    f.tripContextFlags.length > 0 ||
+    f.classTrend === "+"
+  );
+}
+
+// Scan the PASS bucket for a tight rating cluster (≥3 horses within the band)
+// and return the single best promotion (highest non-rating composite > 0 with a
+// positive factor), or null when nothing qualifies.
+export function passCompressionPromotion(
+  passHorses: FusedHorse[],
+  factorsByPgm: Map<string, FusionFactors>,
+): CompressionPromotion | null {
+  const rated = passHorses
+    .filter((h) => h.eeaRating != null)
+    .sort((a, b) => (b.eeaRating ?? 0) - (a.eeaRating ?? 0));
+  if (rated.length < 3) return null;
+
+  // Find the largest cluster where max-min rating <= band and size >= 3.
+  let best: { members: FusedHorse[]; } | null = null;
+  for (let i = 0; i < rated.length; i++) {
+    const members: FusedHorse[] = [rated[i]];
+    for (let j = i + 1; j < rated.length; j++) {
+      if ((rated[i].eeaRating ?? 0) - (rated[j].eeaRating ?? 0) <= RATING_CLUSTER_BAND) {
+        members.push(rated[j]);
+      } else break;
+    }
+    if (members.length >= 3 && (!best || members.length > best.members.length)) {
+      best = { members };
+    }
+  }
+  if (!best) return null;
+
+  // Re-sort the cluster by non-rating composite; promote the top if it has a
+  // positive factor and a positive composite.
+  const scored = best.members
+    .map((h) => ({
+      pgm: h.pgm,
+      factors: factorsByPgm.get(h.pgm) ?? emptyFactors(),
+    }))
+    .map((x) => ({ pgm: x.pgm, factors: x.factors, score: nonRatingComposite(x.factors) }))
+    .sort((a, b) => b.score - a.score);
+
+  const top = scored[0];
+  if (top && top.score > 0 && hasPositiveNonRatingFactor(top.factors)) {
+    return { pgm: top.pgm, compositeScore: top.score };
+  }
+  return null;
+}
+
+// ── A4. Top-pick honesty check ────────────────────────────────────────────────
+// "If the 2nd-best rated horse won, what visible pre-race factor would explain
+// it?" Compare #2 vs #1 across six dimensions; if TWO OR MORE are clearly
+// stronger for #2, fire HONESTY_CHECK and demote conviction one tier.
+export interface HonestyCheckResult {
+  flag: boolean;
+  demotedTier: Tier | null;
+  reasons: string[];
+}
+
+export function runHonestyCheck(
+  _fused: FusedRace,
+  tier: Tier,
+  topFactors: FusionFactors,
+  secondFactors: FusionFactors,
+): HonestyCheckResult {
+  const reasons: string[] = [];
+  // pace fit
+  if (
+    secondFactors.paceFit != null &&
+    topFactors.paceFit != null &&
+    secondFactors.paceFit > topFactors.paceFit + 2
+  ) {
+    reasons.push("pace fit");
+  }
+  // surface fit
+  if (gradeRank(secondFactors.surfaceFitGrade) > gradeRank(topFactors.surfaceFitGrade)) {
+    reasons.push("surface fit");
+  }
+  // distance fit
+  if (gradeRank(secondFactors.distanceFitGrade) > gradeRank(topFactors.distanceFitGrade)) {
+    reasons.push("distance fit");
+  }
+  // bloodstock
+  const secBlood = (secondFactors.bloodstockSurfaceYes ? 1 : 0) + (secondFactors.bloodstockDistanceYes ? 1 : 0);
+  const topBlood = (topFactors.bloodstockSurfaceYes ? 1 : 0) + (topFactors.bloodstockDistanceYes ? 1 : 0);
+  if (secBlood > topBlood) reasons.push("bloodstock");
+  // trip context
+  if (secondFactors.tripContextFlags.length > topFactors.tripContextFlags.length) {
+    reasons.push("trip context");
+  }
+  // class trend
+  if (trendRank(secondFactors.classTrend) > trendRank(topFactors.classTrend)) {
+    reasons.push("class trend");
+  }
+
+  if (reasons.length >= 2) {
+    return { flag: true, demotedTier: demoteOne(tier), reasons };
+  }
+  return { flag: false, demotedTier: null, reasons };
+}
+
+function gradeRank(g: FitGrade | null): number {
+  switch (g) {
+    case "A": return 5;
+    case "B": return 4;
+    case "C": return 3;
+    case "D": return 2;
+    case "F": return 1;
+    default: return 0;
+  }
+}
+function trendRank(t: ClassTrend | null): number {
+  switch (t) {
+    case "+": return 2;
+    case "=": return 1;
+    case "-": return 0;
+    default: return -1;
+  }
+}
+
+// ── A5. Soft-tier minimum content ─────────────────────────────────────────────
+// Every RECON/PASS horse must carry at least one structured factor (pace role,
+// surface/distance fit grade, bloodstock chip, or class trend). A horse hitting
+// a soft tier with none gets a SOFT_TIER_LAZY_BUCKET flag (transparency only —
+// no tier change).
+export function hasAnyStructuredFactor(f: FusionFactors): boolean {
+  return (
+    f.paceRole !== "unclear" ||
+    f.surfaceFitGrade != null ||
+    f.distanceFitGrade != null ||
+    f.bloodstockSurfaceYes ||
+    f.bloodstockDistanceYes ||
+    f.classTrend != null ||
+    f.tripContextFlags.length > 0
+  );
+}
+
+export function softTierLazyBucket(
+  pgm: string,
+  tier: Tier,
+  factors: FusionFactors,
+): string | null {
+  if ((tier === "RECON" || tier === "PASS") && !hasAnyStructuredFactor(factors)) {
+    return `SOFT_TIER_LAZY_BUCKET on #${pgm}`;
+  }
+  return null;
+}
+
 // ── Tier assignment ─────────────────────────────────────────────────────────
 export interface TierResult {
   pgm: string;
   tier: Tier;
   sizingDollars: number;
+  // Per-horse v2 transparency flags (e.g. SOFT_TIER_LAZY_BUCKET on #N). Empty
+  // for horses with nothing to surface.
+  flags?: string[];
+}
+
+// Race-level flags the v2 tuning rules emit (HONESTY_CHECK, the A3 promotion
+// note, etc.). Surfaced so analyze-card can fold them into the race's flags[]
+// for the deep postmortem to grade itself against.
+export interface TierAssignment {
+  tiers: TierResult[];
+  raceFlags: string[];
 }
 
 const TIER_SHARE_KEY: Record<Exclude<Tier, "PASS">, keyof EeaWeights["tierSize"]> = {
@@ -465,26 +893,59 @@ const TIER_SHARE_KEY: Record<Exclude<Tier, "PASS">, keyof EeaWeights["tierSize"]
 // Assign one tier per horse for a race. SNIPER is capped at 1 per call and
 // requires the leader to clear 2nd-best by >= sniperGap. Maiden races default
 // their leaders to RECON. Sizing = bankroll * dailyRiskCap * tierShare.
+//
+// PR #27 tier-tuning v2 (A1-A5) is wired in here — this IS the live tier path
+// (analyze-card calls it before the LLM handoff). Order:
+//   1. base tier per the rank rules
+//   2. A1 earned-class gate on the DUAL slot (downgrade if not earned)
+//   3. A2 rating-gap penalty on the leader's conviction tier
+//   4. A4 honesty check on the top pick (#1 vs #2 across six dimensions)
+//   5. A3 PASS-cluster compression promotion (one horse PASS→RECON)
+//   6. A5 lazy-bucket transparency flag on every soft-tier horse
 export function assignTier(
   fused: FusedRace,
   bankroll: number,
   weights: EeaWeights,
 ): TierResult[] {
+  return assignTierV2(fused, bankroll, weights).tiers;
+}
+
+// Full v2 assignment that also returns race-level flags. assignTier() is the
+// thin back-compat wrapper that returns just the tiers.
+export function assignTierV2(
+  fused: FusedRace,
+  bankroll: number,
+  weights: EeaWeights,
+): TierAssignment {
   const ranked = fused.horses.filter((h) => h.eeaRating != null);
   const dailyCap = bankroll * weights.dailyRiskCapPct;
   const size = (tier: Exclude<Tier, "PASS">) =>
     Math.round(dailyCap * weights.tierSize[TIER_SHARE_KEY[tier]]);
 
-  const results: TierResult[] = [];
+  const raceFlags: string[] = [];
+  const flagsByPgm = new Map<string, string[]>();
+  const addFlag = (pgm: string, flag: string) => {
+    const arr = flagsByPgm.get(pgm) ?? [];
+    arr.push(flag);
+    flagsByPgm.set(pgm, arr);
+  };
+
   if (ranked.length === 0) {
-    return fused.horses.map((h) => ({ pgm: h.pgm, tier: "PASS" as Tier, sizingDollars: 0 }));
+    return {
+      tiers: fused.horses.map((h) => ({ pgm: h.pgm, tier: "PASS" as Tier, sizingDollars: 0 })),
+      raceFlags,
+    };
   }
+
+  const factors = deriveFusionFactors(fused);
+  const factorsFor = (pgm: string) => factors.get(pgm) ?? emptyFactors();
 
   const leader = ranked[0];
   const second = ranked[1];
   const gap = second?.eeaRating != null ? (leader.eeaRating ?? 0) - second.eeaRating : Infinity;
   const isMaiden = fused.raceType === "msw";
 
+  const tierByPgm = new Map<string, Tier>();
   for (const h of fused.horses) {
     let tier: Tier = "PASS";
     if (h.eeaRating == null) {
@@ -494,17 +955,85 @@ export function assignTier(
       else if (gap >= weights.sniperGap) tier = "SNIPER";
       else tier = "EDGE";
     } else if (second && h.pgm === second.pgm) {
-      tier = isMaiden ? "RECON" : "DUAL";
+      // A1: a DUAL slot must be EARNED. If the candidate clears none of the
+      // trip / pace-shape / earned-class gates, it falls out of DUAL to the
+      // next-best soft tier the rank supports.
+      if (isMaiden) {
+        tier = "RECON";
+      } else if (canQualifyAsDual(h, fused, factorsFor(h.pgm))) {
+        tier = "DUAL";
+      } else {
+        tier = "RECON";
+        const f = `A1_DUAL_DOWNGRADE on #${h.pgm} (no trip/pace/earned-class)`;
+        addFlag(h.pgm, f);
+        raceFlags.push(f);
+      }
     } else if (h.rank === 3) {
       tier = isMaiden ? "PASS" : "RECON";
     } else {
       tier = "PASS";
     }
-    results.push({
+    tierByPgm.set(h.pgm, tier);
+  }
+
+  // A2: rating-gap penalty on the leader's conviction tier.
+  const leaderTier = tierByPgm.get(leader.pgm);
+  if (leaderTier && leaderTier !== "PASS") {
+    const pen = ratingGapPenalty(leaderTier, leader, second, factorsFor(leader.pgm));
+    if (pen.applied) {
+      tierByPgm.set(leader.pgm, pen.tier);
+      raceFlags.push(
+        `RATING_GAP_PENALTY on #${leader.pgm} (${leaderTier}→${pen.tier}: ` +
+          `${RATING_GAP_THRESHOLD}+ gap, no earned class)`,
+      );
+    }
+  }
+
+  // A4: top-pick honesty check (#1 vs #2). Demote conviction one tier on a
+  // 2+ dimension miss and log the flag for the postmortem.
+  const curLeaderTier = tierByPgm.get(leader.pgm);
+  if (second && curLeaderTier && curLeaderTier !== "PASS") {
+    const hc = runHonestyCheck(fused, curLeaderTier, factorsFor(leader.pgm), factorsFor(second.pgm));
+    if (hc.flag && hc.demotedTier) {
+      tierByPgm.set(leader.pgm, hc.demotedTier);
+      raceFlags.push(
+        `HONESTY_CHECK on #${leader.pgm} (${curLeaderTier}→${hc.demotedTier}: ` +
+          `#${second.pgm} stronger on ${hc.reasons.join(", ")})`,
+      );
+    }
+  }
+
+  // A3: PASS-cluster compression — promote one buried-but-live horse to RECON.
+  const passHorses = fused.horses.filter((h) => tierByPgm.get(h.pgm) === "PASS");
+  const promo = passCompressionPromotion(passHorses, factors);
+  if (promo) {
+    tierByPgm.set(promo.pgm, "RECON");
+    raceFlags.push(
+      `PASS_COMPRESSION_PROMOTION on #${promo.pgm} (PASS→RECON: ` +
+        `best non-rating fit in cluster, score ${promo.compositeScore})`,
+    );
+  }
+
+  // A5: soft-tier minimum content — transparency flag, no tier change.
+  for (const h of fused.horses) {
+    const tier = tierByPgm.get(h.pgm) ?? "PASS";
+    const lazy = softTierLazyBucket(h.pgm, tier, factorsFor(h.pgm));
+    if (lazy) {
+      addFlag(h.pgm, lazy);
+      raceFlags.push(lazy);
+    }
+  }
+
+  const tiers: TierResult[] = fused.horses.map((h) => {
+    const tier = tierByPgm.get(h.pgm) ?? "PASS";
+    const hf = flagsByPgm.get(h.pgm);
+    return {
       pgm: h.pgm,
       tier,
       sizingDollars: tier === "PASS" ? 0 : size(tier),
-    });
-  }
-  return results;
+      ...(hf && hf.length ? { flags: hf } : {}),
+    };
+  });
+
+  return { tiers, raceFlags };
 }
