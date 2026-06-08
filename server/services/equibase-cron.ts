@@ -8,6 +8,7 @@
 
 import { boiseSevenAmUtcHour } from "./show-cron";
 import { ingestForDate, tomorrowInBoise } from "./equibase-ingest";
+import { runBrisnetIngestNow } from "./brisnet-cron";
 
 let timer: NodeJS.Timeout | null = null;
 
@@ -40,6 +41,9 @@ function scheduleNext(): void {
       console.log(
         `[equibase-cron] done: status=${result.status} tracks=${result.results.length}`,
       );
+      // Brisnet DRM ingest runs sequentially right after Equibase (not in
+      // parallel). It never throws; it logs its own telemetry.
+      await runBrisnetIngestNow();
     } catch (e) {
       console.error("[equibase-cron] ingest threw:", e);
     } finally {

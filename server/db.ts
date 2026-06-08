@@ -221,6 +221,47 @@ CREATE TABLE IF NOT EXISTS equibase_ingest_runs (
   started_at TEXT NOT NULL,
   completed_at TEXT
 );
+
+-- Brisnet DRM (PP Data Files multi) daily auto-ingest telemetry. Same shape as
+-- equibase_ingest_runs: one row per ingest attempt (cron or manual), with the
+-- per-track outcome array in results_json for after-the-fact debugging.
+CREATE TABLE IF NOT EXISTS brisnet_ingest_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  race_date TEXT NOT NULL,
+  track_codes TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  status TEXT NOT NULL,
+  results_json TEXT NOT NULL DEFAULT '[]',
+  error TEXT,
+  started_at TEXT NOT NULL,
+  completed_at TEXT
+);
+
+-- Parsed BRIS-specific per-horse data from the DRM .DR2 file, keyed by
+-- (race_date, track_code, race_number, program_number). raw_row preserves the
+-- full comma-delimited DR2 row so we can re-derive fields as we learn more of
+-- the spec without a re-download. Engine joins on the key to enrich Equibase PP.
+CREATE TABLE IF NOT EXISTS brisnet_horse_data (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  race_date TEXT NOT NULL,
+  track_code TEXT NOT NULL,
+  race_number INTEGER NOT NULL,
+  program_number TEXT NOT NULL,
+  run_style TEXT,
+  prime_power REAL,
+  best_speed REAL,
+  best_speed_surf_a REAL,
+  best_speed_surf_b REAL,
+  speed_par_early REAL,
+  speed_par_late REAL,
+  pace_par_e1 REAL,
+  pace_par_e2 REAL,
+  ml_odds REAL,
+  company_line TEXT,
+  raw_row TEXT NOT NULL,
+  ingested_at TEXT NOT NULL,
+  UNIQUE (race_date, track_code, race_number, program_number)
+);
 `);
 
 // Idempotent settings-column migration for installs that predate EEA v1.

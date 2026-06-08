@@ -34,6 +34,7 @@ import { voiceRouter } from "./routes/voice";
 import { showApiRouter, showFileRouter } from "./routes/show";
 import { equibaseAdminRouter } from "./routes/equibase";
 import { startEquibaseIngestCron } from "./services/equibase-cron";
+import { brisnetAdminRouter } from "./routes/brisnet";
 
 // Helper: load TTS settings (voice / model / speed) from storage.
 function ttsSettings(): { voiceId: string; modelId: string; speed: number } {
@@ -59,8 +60,9 @@ export async function registerRoutes(
   sweepArchive(storage);
   setInterval(() => sweepArchive(storage), 60 * 60 * 1000).unref();
   startPoller();
-  // Daily 6am-MDT Equibase PP auto-ingest (one hour before the 7am show build).
-  // Production-only so local dev never hits the live subscription.
+  // Daily 6am-MDT Equibase PP auto-ingest (one hour before the 7am show build),
+  // immediately followed by the Brisnet DRM ingest (sequential, same slot).
+  // Production-only so local dev never hits the live subscriptions.
   startEquibaseIngestCron();
 
   // ── Cards ────────────────────────────────────────────────────────────────
@@ -503,6 +505,9 @@ export async function registerRoutes(
 
   // ── Equibase PP ingest admin (behind global basic auth) ───────────────────
   app.use("/api/admin/equibase", equibaseAdminRouter());
+
+  // ── Brisnet DRM ingest admin (behind global basic auth) ───────────────────
+  app.use("/api/admin/brisnet", brisnetAdminRouter());
 
   // ── Voices proxy ─────────────────────────────────────────────────────────
   app.get("/api/voices", async (_req, res) => {
