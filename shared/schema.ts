@@ -24,7 +24,8 @@ export const races = sqliteTable("races", {
     .references(() => cards.id, { onDelete: "cascade" }),
   raceNumber: integer("race_number").notNull(),
   tier: text("tier").notNull(), // SNIPER / EDGE / DUAL / RECON / PASS
-  post: text("post"),
+  post: text("post"), // track-local 12-hour display string, e.g. "12:55 PM"
+  postTimeUtc: text("post_time_utc"), // ISO 8601 UTC instant, for sorting/comparison
   conditions: text("conditions"),
   shape: text("shape"),
   read: text("read"),

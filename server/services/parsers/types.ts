@@ -41,6 +41,7 @@ export interface BrisnetHorse {
 export interface BrisnetRace {
   raceNumber: number;
   conditions: RaceConditions;
+  postTimeRaw?: string | null; // raw local post time token, if present
   horses: BrisnetHorse[];
 }
 
@@ -80,6 +81,7 @@ export interface EquibaseRace {
   raceRating?: number | null;
   isMaiden: boolean;
   conditionsRaw?: string;
+  postTimeRaw?: string | null; // raw "Post Time:" line text, if present
   horses: EquibaseHorse[];
 }
 

@@ -45,6 +45,7 @@ interface RaceBlock {
   raceNumber: number;
   raceRating: number | null;
   conditionsRaw: string;
+  postTimeRaw: string | null;
   isMaiden: boolean;
   headerKind: "open" | "maiden";
   rows: string[];
@@ -71,10 +72,15 @@ export function sliceRaceBlocks(text: string): RaceBlock[] {
     raceCounter++;
     let conditionsRaw = "";
     let raceRating: number | null = null;
+    let postTimeRaw: string | null = null;
     for (let b = i - 1; b >= Math.max(0, i - 8); b--) {
       const L = lines[b];
       if (/Purse:/.test(L) || /\b(ALLOWANCE|MAIDEN|STAKES|CLAIMING|OPTIONAL)\b/.test(L)) {
         conditionsRaw = L.trim() + (conditionsRaw ? " " + conditionsRaw : "");
+      }
+      if (postTimeRaw == null) {
+        const pt = L.match(/Post\s*Time:?\s*[0-9: ]+(?:[AP]\.?M\.?)?/i);
+        if (pt) postTimeRaw = pt[0].trim();
       }
       const rr = L.match(/^\s*(\d{2,3})\s*$/);
       if (rr && raceRating == null) raceRating = parseInt(rr[1], 10);
@@ -100,7 +106,14 @@ export function sliceRaceBlocks(text: string): RaceBlock[] {
       } else if (/Pgm\s+Pos\.\s+\(win%\)\s+Horse/.test(L)) {
         break;
       } else if (rows.length > 0 && /Speed Figure Analysis for|Post Time:/.test(L)) {
+        if (postTimeRaw == null) {
+          const pt = L.match(/Post\s*Time:?\s*[0-9: ]+(?:[AP]\.?M\.?)?/i);
+          if (pt) postTimeRaw = pt[0].trim();
+        }
         break;
+      } else if (postTimeRaw == null && /Post\s*Time:/i.test(L)) {
+        const pt = L.match(/Post\s*Time:?\s*[0-9: ]+(?:[AP]\.?M\.?)?/i);
+        if (pt) postTimeRaw = pt[0].trim();
       }
       j++;
       if (j - i > 80) break;
@@ -110,6 +123,7 @@ export function sliceRaceBlocks(text: string): RaceBlock[] {
       raceNumber: raceCounter,
       raceRating,
       conditionsRaw: conditionsRaw.trim(),
+      postTimeRaw,
       isMaiden: /MAIDEN/i.test(conditionsRaw) || isMaidenLayout,
       headerKind: isMaidenLayout ? "maiden" : "open",
       rows,
@@ -318,6 +332,7 @@ export function parseEquibaseText(text: string, track: string, date: string): Eq
       raceRating: blk.raceRating,
       isMaiden: blk.isMaiden,
       conditionsRaw: blk.conditionsRaw,
+      postTimeRaw: blk.postTimeRaw,
       horses,
     });
   }

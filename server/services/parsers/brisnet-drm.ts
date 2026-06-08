@@ -52,6 +52,9 @@ export interface DrmRace {
   speedParLate: number | null;
   paceParE1: number | null;
   paceParE2: number | null;
+  // Track-local post time from the .DRF zone field, e.g. "12:55" (null if the
+  // .DRF member was absent or the field was empty).
+  postTimeRaw: string | null;
   horses: DrmHorse[];
 }
 
@@ -135,6 +138,7 @@ export function parseDr2(text: string, fallbackTrack: string): DrmCard {
         speedParLate: num(at(row, DR2.speedParLate)),
         paceParE1: num(at(row, DR2.paceParE1)),
         paceParE2: num(at(row, DR2.paceParE2)),
+        postTimeRaw: null, // filled from the .DRF member, if present
         horses: [],
       };
       raceMap.set(raceNumber, race);
@@ -192,11 +196,44 @@ export function extractDrmZip(buf: Buffer): DrmZipFiles {
   return files;
 }
 
-// Full path: zip buffer -> structured card. Requires the .DR2 member.
+// Parse the .DRF (race-info) member into a raceNumber → local post-time map.
+// Each physical line is one race; field 3 is the race number and the trailing
+// zone field reads "(12:55)/11:55/10:55/ 9:55" (ET/CT/MT/PT). The parenthesized
+// value is the track-local post; we capture it raw and let post-time.ts convert.
+export function parseDrfPostTimes(text: string): Map<number, string> {
+  const out = new Map<number, string>();
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  for (const line of lines) {
+    const row = parseCsvLine(line);
+    const raceNumber = Number(at(row, 3));
+    if (!Number.isFinite(raceNumber) || raceNumber <= 0) continue;
+    // The zone field is the last non-empty field carrying a "(h:mm)" token.
+    let zoneField = "";
+    for (let i = row.length - 1; i >= 0; i--) {
+      if (/\(\s*\d{1,2}:\d{2}\s*\)/.test(row[i])) {
+        zoneField = row[i];
+        break;
+      }
+    }
+    const paren = zoneField.match(/\(\s*(\d{1,2}:\d{2})\s*\)/);
+    if (paren) out.set(raceNumber, paren[1]);
+  }
+  return out;
+}
+
+// Full path: zip buffer -> structured card. Requires the .DR2 member; uses the
+// .DRF member for post times when present.
 export function parseDrmZip(buf: Buffer, fallbackTrack: string): DrmCard {
   const files = extractDrmZip(buf);
   if (!files.dr2) {
     throw new Error("DRM zip has no .DR2 member");
   }
-  return parseDr2(files.dr2, fallbackTrack);
+  const card = parseDr2(files.dr2, fallbackTrack);
+  if (files.drf) {
+    const postByRace = parseDrfPostTimes(files.drf);
+    for (const race of card.races) {
+      race.postTimeRaw = postByRace.get(race.raceNumber) ?? null;
+    }
+  }
+  return card;
 }
