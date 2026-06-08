@@ -2,6 +2,7 @@ import "dotenv/config";
 import express, { Response, NextFunction } from 'express';
 import type { Request } from 'express';
 import { registerRoutes } from "./routes";
+import { storage } from "./storage";
 import { serveStatic } from "./static";
 import { createServer } from "node:http";
 import { timingSafeEqual } from "node:crypto";
@@ -133,6 +134,8 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // PR #22: seed Jarvis/Scarlett voice ids from env if provided (idempotent).
+  storage.seedVoiceSettings();
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {

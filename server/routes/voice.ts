@@ -17,11 +17,10 @@ import { z } from "zod";
 import { storage } from "../storage";
 import { transcribeAudio } from "../services/stt";
 import {
-  processObservation,
+  processVoiceTurn,
   cardKeyterms,
   resolveRaceId,
   type ConversationTurn,
-  type VoiceResponse,
 } from "../services/voice-persona";
 import { generateSpeech } from "../services/tts";
 import { broadcastEvent } from "../services/events";
@@ -31,7 +30,12 @@ const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 
 function ttsSettings() {
   const s = storage.getSettings();
-  return { voiceId: s.elevenlabsVoiceId, modelId: s.elevenlabsModelId, speed: s.voiceSpeed };
+  return {
+    voiceId: s.elevenlabsVoiceId, // Jarvis (Brian)
+    scarlettVoiceId: s.elevenlabsVoiceIdScarlett, // Scarlett (Sarah)
+    modelId: s.elevenlabsModelId,
+    speed: s.voiceSpeed,
+  };
 }
 
 // Resolve the card the voice loop acts on. Prefer an explicit id; fall back to
@@ -84,7 +88,7 @@ export function voiceRouter(): Router {
     if (!card) return res.status(404).json({ error: "No active card" });
 
     try {
-      const result: VoiceResponse = await processObservation(
+      const result = await processVoiceTurn(
         parsed.data.transcript,
         { card, activeRaceNumber: parsed.data.activeRaceNumber },
         (parsed.data.history as ConversationTurn[]) ?? [],
@@ -93,7 +97,7 @@ export function voiceRouter(): Router {
       // Resolve proposed race_number -> raceId now so the client confirm step
       // can't be tricked into editing the wrong race.
       const resolvedChanges: TierChange[] = [];
-      for (const c of result.proposed_changes) {
+      for (const c of result.proposedChanges) {
         const race = resolveRaceId(card, c.race_number);
         if (!race) continue;
         resolvedChanges.push({
@@ -106,22 +110,24 @@ export function voiceRouter(): Router {
         });
       }
 
-      // Persist the exchange. appliedChanges stays null until confirmed; we
-      // stash the *proposal* in context_summary-adjacent state via the row so
-      // /confirm can look it up by id.
+      // Persist the exchange. appliedChanges stays null until confirmed; the
+      // /confirm flow looks the conversation up by id.
       const convo = storage.createVoiceConversation({
         cardId: card.id,
         userTranscript: parsed.data.transcript,
-        jarvisResponse: result.spoken_response,
+        jarvisResponse: result.spokenResponse,
         appliedChanges: null,
-        contextSummary: result.context_summary ?? null,
+        contextSummary: result.contextSummary ?? null,
       });
 
-      // Generate the spoken reply audio through the existing TTS pipeline.
+      // Voice routing: Jarvis (Brian) speaks tier-change actions; Scarlett
+      // (Sarah) speaks informational replies. Pass the right voice id to TTS.
+      const { voiceId, scarlettVoiceId, modelId, speed } = ttsSettings();
+      const speakVoiceId = result.voice === "jarvis" ? voiceId : scarlettVoiceId;
+
       let audioUrl: string | null = null;
       try {
-        const { voiceId, modelId, speed } = ttsSettings();
-        const speech = await generateSpeech(result.spoken_response, voiceId, modelId, speed);
+        const speech = await generateSpeech(result.spokenResponse, speakVoiceId, modelId, speed);
         audioUrl = speech.audioUrl;
       } catch {
         // TTS failure shouldn't kill the text flow — client falls back to text.
@@ -130,10 +136,11 @@ export function voiceRouter(): Router {
 
       res.json({
         conversationId: convo.id,
-        spokenResponse: result.spoken_response,
+        spokenResponse: result.spokenResponse,
         proposedChanges: resolvedChanges,
-        needsConfirmation: result.needs_confirmation && resolvedChanges.length > 0,
-        contextSummary: result.context_summary ?? null,
+        needsConfirmation: result.needsConfirmation && resolvedChanges.length > 0,
+        contextSummary: result.contextSummary ?? null,
+        voice: result.voice,
         audioUrl,
       });
     } catch (e) {
