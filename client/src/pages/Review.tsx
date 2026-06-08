@@ -39,12 +39,23 @@ function PredictionRow({ p }: { p: Prediction }) {
   });
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-md border border-gold/10 bg-navy-card p-3" data-testid={`prediction-${p.id}`}>
+    <div
+      className={`flex flex-col gap-1.5 rounded-md border border-gold/10 bg-navy-card p-3${p.scratched ? " opacity-50" : ""}`}
+      data-testid={`prediction-${p.id}`}
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="font-display font-black text-gold-light tabular-nums">{p.horsePgm}</span>
-          <span className="text-sm text-silver truncate">{p.horseName}</span>
-          {p.rank != null && (
+          <span className={`font-display font-black text-gold-light tabular-nums${p.scratched ? " line-through" : ""}`}>{p.horsePgm}</span>
+          <span className={`text-sm text-silver truncate${p.scratched ? " line-through" : ""}`}>{p.horseName}</span>
+          {p.scratched && (
+            <span
+              className="shrink-0 rounded border border-loss/40 bg-loss/10 px-1.5 py-0.5 text-[9px] font-display font-bold uppercase tracking-[0.12em] text-loss"
+              data-testid={`scratched-badge-${p.id}`}
+            >
+              Scratched
+            </span>
+          )}
+          {p.rank != null && !p.scratched && (
             <span className="text-[10px] text-muted-brand">#{p.rank}</span>
           )}
         </div>
@@ -81,6 +92,9 @@ function PredictionRow({ p }: { p: Prediction }) {
 
 function RaceBlock({ race }: { race: RaceWithPredictions }) {
   const ranked = [...race.predictions].sort((a, b) => {
+    // Scratched runners sink to the bottom; they still render so the user sees
+    // what was scratched, but they're no longer ranked among the live field.
+    if (!!a.scratched !== !!b.scratched) return a.scratched ? 1 : -1;
     const ra = a.rank ?? 99;
     const rb = b.rank ?? 99;
     if (ra !== rb) return ra - rb;
