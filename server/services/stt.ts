@@ -4,9 +4,14 @@
 // "Aristide Maillol" transcribe cleanly instead of phonetic mush.
 
 const SCRIBE_ENDPOINT = "https://api.elevenlabs.io/v1/speech-to-text";
-// Scribe v2 is the current generation; the model id can be overridden via env
-// if ElevenLabs renames it.
+// Model id is overridable via env. Both scribe_v1 and scribe_v2 are valid;
+// we stay on scribe_v1 to keep accuracy/billing behavior stable.
 const SCRIBE_MODEL = process.env.ELEVENLABS_STT_MODEL || "scribe_v1";
+
+// ElevenLabs Scribe rejects keywords over 50 chars (validation_error:
+// invalid_keyword_length). Some card keyterms (full horse names with sire
+// suffixes) exceed this, so we drop them rather than truncate.
+const MAX_KEYWORD_LEN = 50;
 
 export interface TranscribeOptions {
   keyterms?: string[];
@@ -33,9 +38,25 @@ export async function transcribeAudio(
 
   // Keyterm prompting: bias the recognizer toward the card's proper nouns.
   // Cap the list so the prompt stays small; dedupe is the caller's job.
-  const terms = (opts.keyterms || []).filter(Boolean).slice(0, 100);
-  if (terms.length) {
-    form.append("keyterms", JSON.stringify(terms));
+  // ElevenLabs wants the param named "keywords" with each term as its own
+  // repeated form field — NOT one JSON-stringified blob.
+  const raw = (opts.keyterms || []).slice(0, 100);
+  const terms: string[] = [];
+  let dropped = 0;
+  for (const t of raw) {
+    const term = (t || "").trim();
+    if (!term) continue;
+    if (term.length > MAX_KEYWORD_LEN) {
+      dropped++;
+      continue;
+    }
+    terms.push(term);
+  }
+  if (dropped) {
+    console.debug(`[stt] dropped ${dropped} keyword(s) over ${MAX_KEYWORD_LEN} chars`);
+  }
+  for (const term of terms) {
+    form.append("keywords", term);
   }
 
   const resp = await fetch(SCRIBE_ENDPOINT, {
