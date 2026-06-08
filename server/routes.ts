@@ -36,6 +36,7 @@ import { voiceRouter } from "./routes/voice";
 import { showApiRouter, showFileRouter } from "./routes/show";
 import { equibaseAdminRouter } from "./routes/equibase";
 import { startEquibaseIngestCron } from "./services/equibase-cron";
+import { startWeatherCron } from "./services/weather-cron";
 import { brisnetAdminRouter } from "./routes/brisnet";
 
 // Helper: load TTS settings (voice / model / speed) from storage.
@@ -66,6 +67,9 @@ export async function registerRoutes(
   // immediately followed by the Brisnet DRM ingest (sequential, same slot).
   // Production-only so local dev never hits the live subscriptions.
   startEquibaseIngestCron();
+  // 30-min weather refresh for today + tomorrow's races (PR #18). Runs in all
+  // envs — it only reads OpenWeather and never mutates picks.
+  startWeatherCron();
 
   // ── Cards ────────────────────────────────────────────────────────────────
   // Default to active cards only so the main dashboard never shows past cards.

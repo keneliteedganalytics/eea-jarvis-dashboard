@@ -263,6 +263,24 @@ CREATE TABLE IF NOT EXISTS brisnet_horse_data (
   ingested_at TEXT NOT NULL,
   UNIQUE (race_date, track_code, race_number, program_number)
 );
+
+-- Per-race weather forecast (PR #18). One row per race_id, persisted for
+-- backtesting. surface_impact='unknown' means OpenWeather was unreachable and
+-- the engine left every pick untouched. Numeric fields are nullable for that
+-- case. Upserted by the 30-min scheduler + the backfill script.
+CREATE TABLE IF NOT EXISTS race_weather (
+  race_id INTEGER PRIMARY KEY,
+  temp_f REAL,
+  feels_like_f REAL,
+  conditions TEXT,
+  precip_mm REAL,
+  wind_mph REAL,
+  wind_dir_deg REAL,
+  humidity_pct REAL,
+  surface_impact TEXT NOT NULL DEFAULT 'unknown',
+  source TEXT NOT NULL DEFAULT 'openweather',
+  fetched_at TEXT NOT NULL
+);
 `);
 
 // Idempotent settings-column migration for installs that predate EEA v1.

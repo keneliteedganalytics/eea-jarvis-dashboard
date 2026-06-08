@@ -63,12 +63,31 @@ export function parseMlOdds(ml: string | null | undefined): number | null {
   return null;
 }
 
+// Weather signal handed into fusion (PR #18). Only surfaceImpact is consumed by
+// the engine; the rest rides along for the UI. surfaceImpact "unknown" (or a
+// dry/damp surface) means NO pick is altered.
+export type SurfaceImpact = "dry" | "damp" | "wet" | "sloppy" | "muddy" | "unknown";
+export interface WeatherInput {
+  surfaceImpact: SurfaceImpact;
+}
+
+// Exposed on FusedRace so downstream consumers (picks API, hero) can see why a
+// rating moved. applied=false whenever weather is unknown/dry/damp.
+export interface WeatherAdjustment {
+  applied: boolean;
+  surface: SurfaceImpact;
+  reasonCodes: string[];
+}
+
+const OFF_TRACK = new Set<SurfaceImpact>(["wet", "sloppy", "muddy"]);
+
 export interface FusedRace {
   raceNumber: number;
   raceType: RaceType;
   conditions: RaceConditions;
   shapeNote: string;
   horses: FusedHorse[];
+  weatherAdjustment: WeatherAdjustment;
 }
 
 // ── Race classification ─────────────────────────────────────────────────────
@@ -213,6 +232,7 @@ export function fuseRace(
   equibaseRace: EquibaseRace | undefined,
   weights: EeaWeights,
   bias?: BiasContext,
+  weather?: WeatherInput,
 ): FusedRace {
   const conditions =
     brisnetRace?.conditions ??
@@ -241,7 +261,8 @@ export function fuseRace(
     const eeap = computeEeap(slot.b, slot.e, weights.eeap);
     const eeac = computeEeac(slot.b, slot.e, conditions, weights.eeac);
     const mlOdds = parseMlOdds(slot.b?.ml);
-    return { pgm, name: slot.name, b: slot.b, e: slot.e, eeas, eeap, eeac, mlOdds, flags };
+    const wetWinPct = slot.b?.wetWinPct ?? slot.e?.wetWinPct ?? null;
+    return { pgm, name: slot.name, b: slot.b, e: slot.e, eeas, eeap, eeac, mlOdds, wetWinPct, flags };
   });
 
   // Determine pace shape from EEAP distribution (who projects to be on the lead).
@@ -253,8 +274,17 @@ export function fuseRace(
   const contestedPace = earlyTypes.length >= 2;
   const loneSpeedPgm = earlyTypes.length === 1 ? earlyTypes[0].pgm : null;
 
+  // Weather factor (PR #18): only an off-track surface with REAL data adjusts
+  // ratings. We collect reason codes once for the race-level summary.
+  const surface = weather?.surfaceImpact ?? "unknown";
+  const wetTrack = OFF_TRACK.has(surface);
+  const isTurf = (conditions.surface || "").toUpperCase().includes("TURF");
+  const sev = wetTrack ? weights.weather.severity[surface as "wet" | "sloppy" | "muddy"] : 0;
+  const weatherReasons = new Set<string>();
+
   const horses: FusedHorse[] = interim.map((h) => {
     const loneSpeed = h.pgm === loneSpeedPgm;
+    const isEarly = earlyTypes.some((t) => t.pgm === h.pgm);
     const eeapFit = computeEeapFit(h.eeap, loneSpeed, contestedPace && !loneSpeed, bias);
     const cls = weights.classAware[raceType];
     // EEA Rating combines the composites under the rating weights, then the
@@ -263,11 +293,38 @@ export function fuseRace(
     const paceTerm = (eeapFit ?? h.eeap ?? 0) * weights.rating.eeap_fit * (cls?.form_weight ?? 1);
     const classTerm = (h.eeac ?? 0) * weights.rating.eeac * (cls?.class_weight ?? 1);
     const hasAny = h.eeas != null || h.eeap != null || h.eeac != null;
-    const eeaRating = hasAny ? Math.round((speedTerm + paceTerm + classTerm) * 10) / 10 : null;
+    let baseRating = hasAny ? speedTerm + paceTerm + classTerm : null;
 
     const flags = [...h.flags];
     if (loneSpeed) flags.push("projected-lone-speed");
-    if (contestedPace && earlyTypes.some((t) => t.pgm === h.pgm)) flags.push("in-pace-duel");
+    if (contestedPace && isEarly) flags.push("in-pace-duel");
+
+    // ── Weather adjustment (only on off-track + real data) ────────────────
+    if (wetTrack && baseRating != null) {
+      // 1) Boost proven mudders, scaled by wet win % and surface severity.
+      if (h.wetWinPct != null && h.wetWinPct > 0) {
+        baseRating += weights.weather.mudderBoostMax * (h.wetWinPct / 100) * sev;
+        flags.push("wet-track-boost");
+        weatherReasons.add("mudder-boost");
+      }
+      // 2) Turf rained on: de-emphasize raw turf speed (turf plays differently).
+      if (isTurf) {
+        baseRating -= weights.weather.turfSpeedPenalty * (h.eeas ?? 0 ? 1 : 0) * sev;
+        weatherReasons.add("turf-speed-deemphasized");
+      }
+      // 3) Sloppy/muddy dirt flattens pace: lightly favor closers over speed.
+      if (!isTurf) {
+        if (isEarly) {
+          baseRating -= weights.weather.closerBias * sev;
+          weatherReasons.add("speed-trimmed-off-track");
+        } else {
+          baseRating += weights.weather.closerBias * sev;
+          weatherReasons.add("closer-favored-off-track");
+        }
+      }
+    }
+
+    const eeaRating = baseRating != null ? Math.round(baseRating * 10) / 10 : null;
 
     return {
       pgm: h.pgm,
@@ -292,7 +349,20 @@ export function fuseRace(
   if (loneSpeedPgm) shapeNote = `lone speed (#${loneSpeedPgm})`;
   else if (contestedPace) shapeNote = `contested pace (${earlyTypes.length} early types)`;
 
-  return { raceNumber: brisnetRace?.raceNumber ?? equibaseRace?.raceNumber ?? 0, raceType, conditions, shapeNote, horses };
+  const weatherAdjustment: WeatherAdjustment = {
+    applied: wetTrack && weatherReasons.size > 0,
+    surface,
+    reasonCodes: Array.from(weatherReasons),
+  };
+
+  return {
+    raceNumber: brisnetRace?.raceNumber ?? equibaseRace?.raceNumber ?? 0,
+    raceType,
+    conditions,
+    shapeNote,
+    horses,
+    weatherAdjustment,
+  };
 }
 
 // ── Tier assignment ─────────────────────────────────────────────────────────

@@ -28,7 +28,8 @@ import {
   fallbackPostTime,
   type PostTime,
 } from "./parsers/post-time";
-import type { InsertRace } from "@shared/schema";
+import type { InsertRace, RaceWeather } from "@shared/schema";
+import { getRaceWeather } from "./weather";
 
 export interface AnalyzeInput {
   track: string;
@@ -154,15 +155,31 @@ export async function analyzeCard(
 
   const cfg = loadHandoffConfig(input.provider);
 
-  // Build per-race scaffolding (fusion happens up front; LLM per race below).
-  const fusedRaces = bris.races.map((br: BrisnetRace) =>
-    fuseRace(br, equiByNum.get(br.raceNumber), weights, biasCtx),
-  );
-
   // Resolve a post time for every race in race-number order so the fallback can
   // chain off the previous race. Source priority: Equibase "Post Time:" line →
   // Brisnet local post token → previous-race + delta (logged). Never NULL.
-  const postByNum = resolvePostTimes(fusedRaces, equiByNum, bris.races, input);
+  // Done before fusion so the weather factor can key off each race's post time.
+  const postByNum = resolvePostTimes(
+    bris.races.map((r) => ({ raceNumber: r.raceNumber })),
+    equiByNum,
+    bris.races,
+    input,
+  );
+
+  // Fetch weather per race (never throws; "unknown" on any failure). The engine
+  // only biases ratings on a wet/sloppy/muddy surface with real data.
+  onProgress("Fetching race weather");
+  const weatherByNum = new Map<number, RaceWeather>();
+  for (const br of bris.races) {
+    const pt = postByNum.get(br.raceNumber);
+    if (!pt?.utcIso) continue;
+    weatherByNum.set(br.raceNumber, await getRaceWeather(input.track, pt.utcIso));
+  }
+
+  // Build per-race scaffolding (fusion happens up front; LLM per race below).
+  const fusedRaces = bris.races.map((br: BrisnetRace) =>
+    fuseRace(br, equiByNum.get(br.raceNumber), weights, biasCtx, weatherByNum.get(br.raceNumber)),
+  );
 
   // Create the card with placeholder race rows (tier filled after LLM).
   const raceRowSeeds: Omit<InsertRace, "cardId">[] = fusedRaces.map((f) => ({
@@ -210,6 +227,12 @@ export async function analyzeCard(
   const raceRows = storage.getRacesByCard(card.id);
   const raceIdByNum = new Map<number, number>();
   for (const r of raceRows) raceIdByNum.set(r.raceNumber, r.id);
+
+  // Persist the per-race weather rows for backtesting + the UI chip.
+  for (const [raceNumber, w] of Array.from(weatherByNum.entries())) {
+    const raceId = raceIdByNum.get(raceNumber);
+    if (raceId != null) storage.upsertRaceWeather(raceId, w);
+  }
 
   let analyzed = 0;
   const finalTiers: Tier[] = [];

@@ -15,6 +15,7 @@ import {
   voiceConversations,
   predictionHistory,
   cardShows,
+  raceWeather,
 } from "@shared/schema";
 import type {
   Card,
@@ -43,6 +44,8 @@ import type {
   InsertMaidenEnrichment,
   RaceSummary,
   InsertRaceSummary,
+  RaceWeather,
+  RaceWeatherRow,
   VoiceConversation,
   PredictionHistory,
   CardShow,
@@ -74,6 +77,8 @@ export interface IStorage {
   getRacesByCard(cardId: number): Race[];
   updateRaceText(id: number, whyText?: string, paceText?: string): Race | undefined;
   updateRaceFusion(id: number, patch: Partial<Race>): Race | undefined;
+  getRaceWeather(raceId: number): RaceWeather | null;
+  upsertRaceWeather(raceId: number, w: RaceWeather): void;
 
   // Results
   getResultByRace(raceId: number): Result | undefined;
@@ -151,6 +156,22 @@ export interface IStorage {
   getLatestSnapshot(raceId: number): PredictionHistory | undefined;
 }
 
+// Map a persisted race_weather row to the RaceWeather API/engine shape.
+function rowToRaceWeather(row: RaceWeatherRow): RaceWeather {
+  return {
+    tempF: row.tempF,
+    feelsLikeF: row.feelsLikeF,
+    conditions: row.conditions,
+    precipMm: row.precipMm,
+    windMph: row.windMph,
+    windDirDeg: row.windDirDeg,
+    humidityPct: row.humidityPct,
+    surfaceImpact: row.surfaceImpact as RaceWeather["surfaceImpact"],
+    fetchedAt: row.fetchedAt,
+    source: "openweather",
+  };
+}
+
 export class DatabaseStorage implements IStorage {
   // ── Cards ───────────────────────────────────────────────────────────────
   getCards(): Card[] {
@@ -176,6 +197,7 @@ export class DatabaseStorage implements IStorage {
       ...r,
       result: this.getResultByRace(r.id) ?? null,
       bets: buildWagers(r, { bankroll: s.bankroll, dailyRiskCapPct: s.dailyRiskCapPct }, racesOnCard),
+      weather: this.getRaceWeather(r.id),
     }));
     return { ...card, races: withResults };
   }
@@ -278,6 +300,36 @@ export class DatabaseStorage implements IStorage {
 
   getRacesByCard(cardId: number): Race[] {
     return db.select().from(races).where(eq(races.cardId, cardId)).all();
+  }
+
+  // ── Race weather (PR #18) ─────────────────────────────────────────────────
+  getRaceWeather(raceId: number): RaceWeather | null {
+    const row = db
+      .select()
+      .from(raceWeather)
+      .where(eq(raceWeather.raceId, raceId))
+      .get();
+    return row ? rowToRaceWeather(row) : null;
+  }
+
+  upsertRaceWeather(raceId: number, w: RaceWeather): void {
+    const values = {
+      raceId,
+      tempF: w.tempF,
+      feelsLikeF: w.feelsLikeF,
+      conditions: w.conditions,
+      precipMm: w.precipMm,
+      windMph: w.windMph,
+      windDirDeg: w.windDirDeg,
+      humidityPct: w.humidityPct,
+      surfaceImpact: w.surfaceImpact,
+      source: w.source,
+      fetchedAt: w.fetchedAt,
+    };
+    db.insert(raceWeather)
+      .values(values)
+      .onConflictDoUpdate({ target: raceWeather.raceId, set: values })
+      .run();
   }
 
   updateRaceText(id: number, whyText?: string, paceText?: string): Race | undefined {
