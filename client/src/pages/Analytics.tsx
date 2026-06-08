@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -5,11 +6,17 @@ import {
 } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
 
+type Scope = "today" | "track" | "lifetime";
+
 interface AnalyticsSummary {
+  scope: Scope;
+  track: string | null;
+  date: string | null;
   totalCards: number;
   totalRaces: number;
   gradedRaces: number;
   avgWinPct: number;
+  avgItmPct: number;
   roi: number;
   bestTier: string;
   tierHitRates: { tier: string; win: number; place: number; show: number; itm: number }[];
@@ -18,11 +25,92 @@ interface AnalyticsSummary {
   raceTypePerf: { type: string; winPct: number }[];
 }
 
+interface TrackRow {
+  track: string;
+  cards: number;
+  graded: number;
+  lastDate: string | null;
+}
+
+interface CardListItem {
+  id: number;
+  track: string;
+  date: string;
+  status: string;
+}
+
+interface LifetimeStats {
+  byTrack: { track: string; cards: number; races: number; graded: number; win: number | null; itm: number | null; lastUpdated: string | null }[];
+}
+
 const GOLD = "#C9A227";
 const GOLD_LIGHT = "#E8C14A";
 const WIN = "#4ADE80";
 const SLATE = "#6B7A99";
 const LOSS = "#EF4444";
+
+const tooltipStyle = {
+  backgroundColor: "#0F1F3D",
+  border: "1px solid rgba(201,162,39,0.3)",
+  borderRadius: 8,
+  color: "#DCE8F0",
+  fontSize: 12,
+};
+
+function todayUtc(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function ScopeTabs({ value, onChange }: { value: Scope; onChange: (s: Scope) => void }) {
+  const tabs: { key: Scope; label: string }[] = [
+    { key: "today", label: "Today" },
+    { key: "track", label: "Per-Track" },
+    { key: "lifetime", label: "Lifetime" },
+  ];
+  return (
+    <div className="inline-flex rounded-lg border border-gold/15 bg-navy-card p-1 gap-1">
+      {tabs.map((t) => (
+        <button
+          key={t.key}
+          onClick={() => onChange(t.key)}
+          className={
+            "px-3 py-1.5 text-[11px] uppercase tracking-[0.14em] font-display font-bold rounded-md transition-colors " +
+            (value === t.key
+              ? "bg-gold/15 text-gold-light"
+              : "text-muted-brand hover:text-silver")
+          }
+          data-testid={`scope-tab-${t.key}`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ChipStrip({ items, selected, onSelect }: { items: { key: string; label: string; sub?: string }[]; selected: string | null; onSelect: (k: string) => void }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {items.map((it) => (
+        <button
+          key={it.key}
+          onClick={() => onSelect(it.key)}
+          className={
+            "px-3 py-1.5 text-[11px] rounded-md border transition-colors " +
+            (selected === it.key
+              ? "border-gold/40 bg-gold/10 text-gold-light"
+              : "border-gold/10 bg-navy-card text-muted-brand hover:text-silver")
+          }
+          data-testid={`chip-${it.key.toLowerCase().replace(/\s+/g, "-")}`}
+        >
+          <span className="font-display font-bold uppercase tracking-[0.1em]">{it.label}</span>
+          {it.sub && <span className="ml-2 text-muted-brand tabular-nums">{it.sub}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function ChartCard({ title, children, note }: { title: string; children: React.ReactNode; note?: string }) {
   return (
@@ -43,42 +131,26 @@ function KpiCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-const tooltipStyle = {
-  backgroundColor: "#0F1F3D",
-  border: "1px solid rgba(201,162,39,0.3)",
-  borderRadius: 8,
-  color: "#DCE8F0",
-  fontSize: 12,
-};
-
-export default function Analytics() {
-  const { data, isLoading } = useQuery<AnalyticsSummary>({ queryKey: ["/api/analytics/summary"] });
-
-  if (isLoading || !data) {
-    return <div className="p-6 grid sm:grid-cols-2 gap-4">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-64 w-full" />)}</div>;
-  }
-
+function Charts({ data }: { data: AnalyticsSummary }) {
   const sparse = data.gradedRaces <= 1;
-
   return (
-    <div className="p-4 sm:p-6 max-w-[1400px] mx-auto pb-28">
-      <h1 className="text-xl font-display font-black text-silver">Trends &amp; Analytics</h1>
+    <>
       {sparse && (
         <div className="mt-2 text-xs text-muted-brand">
-          Need more cards to populate trends — showing data from the current card.
+          {data.gradedRaces === 0
+            ? "No graded races in this scope yet."
+            : "Limited data — only one graded race in this scope."}
         </div>
       )}
 
-      {/* KPI row */}
       <div className="mt-4 grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <KpiCard label="Total Cards" value={String(data.totalCards)} />
-        <KpiCard label="Total Races" value={String(data.totalRaces)} />
-        <KpiCard label="Avg Win %" value={`${data.avgWinPct}%`} />
+        <KpiCard label="Graded" value={String(data.gradedRaces)} />
+        <KpiCard label="Win %" value={`${data.avgWinPct}%`} />
+        <KpiCard label="ITM %" value={`${data.avgItmPct}%`} />
         <KpiCard label="ROI" value={`${data.roi >= 0 ? "+" : ""}${data.roi}%`} />
         <KpiCard label="Best Tier" value={data.bestTier} />
       </div>
 
-      {/* Charts */}
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <ChartCard title="Hit Rate by Conviction Tier">
           <ResponsiveContainer>
@@ -136,6 +208,167 @@ export default function Analytics() {
           </ResponsiveContainer>
         </ChartCard>
       </div>
+    </>
+  );
+}
+
+function ByTrackTable({ rows }: { rows: LifetimeStats["byTrack"] }) {
+  if (!rows.length) return null;
+  return (
+    <div className="mt-6 rounded-lg border border-gold/10 bg-navy-card p-4">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-3">Lifetime by Track</div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-muted-brand uppercase tracking-[0.1em]">
+            <tr>
+              <th className="text-left py-2">Track</th>
+              <th className="text-right py-2">Cards</th>
+              <th className="text-right py-2">Races</th>
+              <th className="text-right py-2">Graded</th>
+              <th className="text-right py-2">Win%</th>
+              <th className="text-right py-2">ITM%</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.track} className="border-t border-gold/5 text-silver">
+                <td className="py-2 font-display font-bold">{r.track}</td>
+                <td className="py-2 text-right tabular-nums">{r.cards}</td>
+                <td className="py-2 text-right tabular-nums">{r.races}</td>
+                <td className="py-2 text-right tabular-nums">{r.graded}</td>
+                <td className="py-2 text-right tabular-nums">{r.win == null ? "—" : `${r.win}%`}</td>
+                <td className="py-2 text-right tabular-nums">{r.itm == null ? "—" : `${r.itm}%`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export default function Analytics() {
+  const [scope, setScope] = useState<Scope>("today");
+  const [selectedTrack, setSelectedTrack] = useState<string | null>(null);
+  const [todaySubTrack, setTodaySubTrack] = useState<string | null>(null);
+
+  const today = todayUtc();
+
+  // Today scope — fetch active cards to detect 0 / 1 / 2+ cards
+  const { data: cards = [] } = useQuery<CardListItem[]>({ queryKey: ["/api/cards"] });
+  const todayCards = useMemo(
+    () => cards.filter((c) => c.date === today && c.status === "active"),
+    [cards, today],
+  );
+
+  // When entering Today scope with multiple cards, default to first track
+  useEffect(() => {
+    if (scope === "today" && todayCards.length >= 2 && !todaySubTrack) {
+      setTodaySubTrack(todayCards[0].track);
+    }
+    if (scope === "today" && todayCards.length < 2) {
+      setTodaySubTrack(null);
+    }
+  }, [scope, todayCards, todaySubTrack]);
+
+  // Tracks list for Per-Track scope
+  const { data: tracks = [] } = useQuery<TrackRow[]>({ queryKey: ["/api/analytics/tracks"] });
+  useEffect(() => {
+    if (scope === "track" && !selectedTrack && tracks.length > 0) {
+      setSelectedTrack(tracks[0].track);
+    }
+  }, [scope, selectedTrack, tracks]);
+
+  // Lifetime by-track table data
+  const { data: lifetime } = useQuery<LifetimeStats>({
+    queryKey: ["/api/stats/lifetime"],
+    enabled: scope === "lifetime",
+  });
+
+  // Build the actual analytics query for the current scope
+  const summaryUrl = useMemo(() => {
+    if (scope === "today") {
+      if (todayCards.length >= 2 && todaySubTrack) {
+        return `/api/analytics/summary?scope=track&track=${encodeURIComponent(todaySubTrack)}&date=${today}`;
+      }
+      if (todayCards.length === 1) {
+        return `/api/analytics/summary?scope=track&track=${encodeURIComponent(todayCards[0].track)}&date=${today}`;
+      }
+      return `/api/analytics/summary?scope=today`;
+    }
+    if (scope === "track" && selectedTrack) {
+      return `/api/analytics/summary?scope=track&track=${encodeURIComponent(selectedTrack)}`;
+    }
+    return `/api/analytics/summary?scope=lifetime`;
+  }, [scope, todayCards, todaySubTrack, selectedTrack, today]);
+
+  const { data, isLoading } = useQuery<AnalyticsSummary>({ queryKey: [summaryUrl] });
+
+  const scopeLabel = useMemo(() => {
+    if (scope === "today") {
+      if (todayCards.length >= 2 && todaySubTrack) return `Today · ${todaySubTrack}`;
+      if (todayCards.length === 1) return `Today · ${todayCards[0].track}`;
+      return "Today";
+    }
+    if (scope === "track") return `${selectedTrack ?? "Pick a track"} · All-Time`;
+    return "Lifetime · All Tracks";
+  }, [scope, todayCards, todaySubTrack, selectedTrack]);
+
+  return (
+    <div className="p-4 sm:p-6 max-w-[1400px] mx-auto pb-28">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <h1 className="text-xl font-display font-black text-silver">Trends &amp; Analytics</h1>
+        <ScopeTabs value={scope} onChange={setScope} />
+      </div>
+
+      <div className="mt-3 text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold">
+        Showing: {scopeLabel}
+      </div>
+
+      {scope === "today" && todayCards.length === 0 && (
+        <div className="mt-6 rounded-lg border border-gold/10 bg-navy-card p-6 text-center">
+          <div className="text-sm text-muted-brand">No active cards today.</div>
+          <div className="mt-1 text-[11px] text-muted-brand">Pull a card from the Home page to start handicapping.</div>
+        </div>
+      )}
+
+      {scope === "today" && todayCards.length >= 2 && (
+        <div className="mt-4">
+          <ChipStrip
+            items={todayCards.map((c) => ({ key: c.track, label: c.track }))}
+            selected={todaySubTrack}
+            onSelect={setTodaySubTrack}
+          />
+        </div>
+      )}
+
+      {scope === "track" && (
+        <div className="mt-4">
+          <ChipStrip
+            items={tracks.map((t) => ({
+              key: t.track,
+              label: t.track,
+              sub: `${t.graded}g`,
+            }))}
+            selected={selectedTrack}
+            onSelect={setSelectedTrack}
+          />
+        </div>
+      )}
+
+      {(scope !== "today" || todayCards.length > 0) && (
+        <>
+          {isLoading || !data ? (
+            <div className="mt-4 grid sm:grid-cols-2 gap-4">
+              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-64 w-full" />)}
+            </div>
+          ) : (
+            <Charts data={data} />
+          )}
+        </>
+      )}
+
+      {scope === "lifetime" && lifetime && <ByTrackTable rows={lifetime.byTrack} />}
     </div>
   );
 }

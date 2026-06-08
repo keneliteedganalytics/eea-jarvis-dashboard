@@ -26,10 +26,36 @@ function classify(conditions: string | null): string {
   return "Other";
 }
 
-export function buildAnalyticsSummary() {
+// Scope-aware summary. Default scope is "lifetime" so the existing
+// no-argument callers keep their old behavior. Pass { scope: "today" } to
+// filter to cards where card.date === today (UTC, matching how the rest of
+// the codebase reckons "today"). Pass { scope: "track", track } to filter to
+// one track all-time. An optional `date` further narrows scope="track" to a
+// single day, which is how the single-card-today view drives this endpoint.
+export interface AnalyticsScope {
+  scope?: "today" | "track" | "lifetime";
+  track?: string;
+  date?: string; // YYYY-MM-DD
+}
+
+function todayUtc(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function buildAnalyticsSummary(opts: AnalyticsScope = {}) {
+  const scope = opts.scope ?? "lifetime";
   const cards = storage.getCards();
   const settings = storage.getSettings();
-  const fullCards: CardWithRaces[] = cards
+  const filteredCards = cards.filter((c) => {
+    if (scope === "today") return c.date === todayUtc();
+    if (scope === "track") {
+      if (opts.track && c.track !== opts.track) return false;
+      if (opts.date && c.date !== opts.date) return false;
+      return !!opts.track;
+    }
+    return true;
+  });
+  const fullCards: CardWithRaces[] = filteredCards
     .map((c) => storage.getCardWithRaces(c.id))
     .filter((c): c is CardWithRaces => !!c);
 
@@ -112,14 +138,20 @@ export function buildAnalyticsSummary() {
   // KPIs
   const winN = graded.filter((r) => r.result?.winHit).length;
   const avgWinPct = graded.length ? Math.round((winN / graded.length) * 100) : 0;
+  const itmN = graded.filter((r) => (r.result?.itmCount ?? 0) > 0).length;
+  const avgItmPct = graded.length ? Math.round((itmN / graded.length) * 100) : 0;
   const bestTier =
     tierHitRates.reduce((best, t) => (t.win > best.win ? t : best), { tier: "—", win: -1 }).tier;
 
   return {
-    totalCards: cards.length,
+    scope,
+    track: opts.track ?? null,
+    date: opts.date ?? (scope === "today" ? todayUtc() : null),
+    totalCards: fullCards.length,
     totalRaces: allRaces.length,
     gradedRaces: graded.length,
     avgWinPct,
+    avgItmPct,
     roi,
     bestTier,
     tierHitRates,
@@ -127,6 +159,41 @@ export function buildAnalyticsSummary() {
     flagAccuracy,
     raceTypePerf,
   };
+}
+
+// Distinct-tracks list for the Per-Track scope chip strip. Ordered by
+// lastDate desc so the most recently raced track surfaces first.
+export interface AnalyticsTrackRow {
+  track: string;
+  cards: number;
+  graded: number;
+  lastDate: string | null;
+}
+
+export function buildAnalyticsTracks(): AnalyticsTrackRow[] {
+  const cards = storage.getCards();
+  const fullCards: CardWithRaces[] = cards
+    .map((c) => storage.getCardWithRaces(c.id))
+    .filter((c): c is CardWithRaces => !!c);
+  const byTrack = new Map<string, CardWithRaces[]>();
+  for (const c of fullCards) {
+    const list = byTrack.get(c.track) ?? [];
+    list.push(c);
+    byTrack.set(c.track, list);
+  }
+  const rows: AnalyticsTrackRow[] = [];
+  byTrack.forEach((list: CardWithRaces[], track: string) => {
+    const graded = list.flatMap((c: CardWithRaces) => c.races).filter((r: RaceWithResult) => r.result).length;
+    const lastDate = list.map((c: CardWithRaces) => c.date).sort().at(-1) ?? null;
+    rows.push({ track, cards: list.length, graded, lastDate });
+  });
+  rows.sort((a, b) => {
+    if (a.lastDate && b.lastDate) return b.lastDate.localeCompare(a.lastDate);
+    if (a.lastDate) return -1;
+    if (b.lastDate) return 1;
+    return a.track.localeCompare(b.track);
+  });
+  return rows;
 }
 
 // ── Lifetime scorecard (All-Time panel) ──────────────────────────────────

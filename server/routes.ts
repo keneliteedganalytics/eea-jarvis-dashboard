@@ -17,6 +17,7 @@ import { getOrFetchBias, fetchBias } from "./services/bias-fetcher";
 import { getOrGenerateRaceSummary } from "./services/race-summary";
 import {
   buildAnalyticsSummary,
+  buildAnalyticsTracks,
   buildCardStats,
   buildLifetimeStats,
   buildTrackRecordSummary,
@@ -428,8 +429,21 @@ export async function registerRoutes(
   });
 
   // ── Analytics ────────────────────────────────────────────────────────────
-  app.get("/api/analytics/summary", (_req, res) => {
-    res.json(buildAnalyticsSummary());
+  // Scope-aware: ?scope=today | track | lifetime (default lifetime).
+  // For scope=track, pass &track=<Track Name>; optional &date=YYYY-MM-DD
+  // narrows that track to a single day (used by Today view single-card path).
+  app.get("/api/analytics/summary", (req, res) => {
+    const rawScope = String(req.query.scope || "lifetime").toLowerCase();
+    const scope: "today" | "track" | "lifetime" =
+      rawScope === "today" || rawScope === "track" ? (rawScope as "today" | "track") : "lifetime";
+    const track = typeof req.query.track === "string" ? req.query.track : undefined;
+    const date = typeof req.query.date === "string" ? req.query.date : undefined;
+    res.json(buildAnalyticsSummary({ scope, track, date }));
+  });
+
+  // Distinct list of tracks with graded race counts, for the Per-Track picker.
+  app.get("/api/analytics/tracks", (_req, res) => {
+    res.json(buildAnalyticsTracks());
   });
 
   // Lifetime scorecard — aggregates across ALL cards (active + archived).
