@@ -14,6 +14,7 @@ import {
   raceSummaries,
   voiceConversations,
   predictionHistory,
+  cardShows,
 } from "@shared/schema";
 import type {
   Card,
@@ -44,6 +45,8 @@ import type {
   InsertRaceSummary,
   VoiceConversation,
   PredictionHistory,
+  CardShow,
+  ShowManifest,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, isNull, desc } from "drizzle-orm";
@@ -331,6 +334,43 @@ export class DatabaseStorage implements IStorage {
       .returning()
       .get();
     return row;
+  }
+
+  // ── Daily Show ──────────────────────────────────────────────────────────
+  getCardShow(cardId: number): CardShow | undefined {
+    return db.select().from(cardShows).where(eq(cardShows.cardId, cardId)).get();
+  }
+
+  // Mark a card's show as building (or re-building). Clears any prior error and
+  // manifest so a stale-state read never looks ready mid-rebuild.
+  startCardShow(cardId: number): CardShow {
+    const now = new Date().toISOString();
+    db.delete(cardShows).where(eq(cardShows.cardId, cardId)).run();
+    return db
+      .insert(cardShows)
+      .values({ cardId, status: "building", startedAt: now, completedAt: null, error: null, manifestJson: null })
+      .returning()
+      .get();
+  }
+
+  completeCardShow(cardId: number, manifest: ShowManifest): CardShow | undefined {
+    db.update(cardShows)
+      .set({ status: "ready", manifestJson: JSON.stringify(manifest), completedAt: new Date().toISOString(), error: null })
+      .where(eq(cardShows.cardId, cardId))
+      .run();
+    return this.getCardShow(cardId);
+  }
+
+  failCardShow(cardId: number, error: string): CardShow | undefined {
+    db.update(cardShows)
+      .set({ status: "error", error: error.slice(0, 1000), completedAt: new Date().toISOString() })
+      .where(eq(cardShows.cardId, cardId))
+      .run();
+    return this.getCardShow(cardId);
+  }
+
+  deleteCardShow(cardId: number): void {
+    db.delete(cardShows).where(eq(cardShows.cardId, cardId)).run();
   }
 
   // ── Settings ────────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ import {
   TrendingUp,
   Archive,
   Users,
+  Film,
   Settings as SettingsIcon,
   Menu,
 } from "lucide-react";
@@ -24,6 +25,7 @@ const NAV = [
   { href: "/results", label: "Results", icon: ClipboardCheck, testid: "nav-results" },
   { href: "/analytics", label: "Analytics", icon: TrendingUp, testid: "nav-analytics" },
   { href: "/historical", label: "Historical", icon: Archive, testid: "nav-historical", match: "/historical" },
+  { href: "/show", label: "Daily Show", icon: Film, testid: "link-daily-show" },
   { href: "/about", label: "Meet the Team", icon: Users, testid: "link-about" },
   { href: "/settings", label: "Settings", icon: SettingsIcon, testid: "nav-settings" },
 ];

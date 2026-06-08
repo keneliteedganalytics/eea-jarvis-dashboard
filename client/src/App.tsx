@@ -20,6 +20,7 @@ import Settings from "@/pages/Settings";
 import Print from "@/pages/Print";
 import Historical from "@/pages/Historical";
 import HistoricalCard from "@/pages/HistoricalCard";
+import DailyShow from "@/pages/DailyShow";
 import About from "@/pages/About";
 
 function AppRouter() {
@@ -32,6 +33,7 @@ function AppRouter() {
       <Route path="/analytics" component={Analytics} />
       <Route path="/historical" component={Historical} />
       <Route path="/historical/:id" component={HistoricalCard} />
+      <Route path="/show" component={DailyShow} />
       <Route path="/about" component={About} />
       <Route path="/settings" component={Settings} />
       <Route component={NotFound} />

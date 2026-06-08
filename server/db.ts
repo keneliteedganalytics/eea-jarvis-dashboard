@@ -195,6 +195,16 @@ CREATE TABLE IF NOT EXISTS race_summaries (
   eea_version INTEGER,
   generated_at INTEGER NOT NULL
 );
+
+-- Trackside Daily Show build state, one row per card.
+CREATE TABLE IF NOT EXISTS card_shows (
+  card_id INTEGER PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'queued',
+  manifest_json TEXT,
+  error TEXT,
+  started_at TEXT,
+  completed_at TEXT
+);
 `);
 
 // Idempotent settings-column migration for installs that predate EEA v1.
