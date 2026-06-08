@@ -353,11 +353,35 @@ export class DatabaseStorage implements IStorage {
       .get();
   }
 
+  // Mark a card's show as requested: the build happens out-of-band in Computer,
+  // which polls for this state, generates the clips, and POSTs them back. Clears
+  // any prior error/manifest so a stale read never looks ready while requested.
+  requestCardShow(cardId: number): CardShow {
+    const now = new Date().toISOString();
+    db.delete(cardShows).where(eq(cardShows.cardId, cardId)).run();
+    return db
+      .insert(cardShows)
+      .values({ cardId, status: "requested", startedAt: now, completedAt: null, error: null, manifestJson: null })
+      .returning()
+      .get();
+  }
+
+  // Mark ready with the built manifest. Upserts so a direct upload (no prior
+  // requested/building row, e.g. Computer posting clips out-of-band) still
+  // persists; when a row already exists the timestamps/status are updated.
   completeCardShow(cardId: number, manifest: ShowManifest): CardShow | undefined {
-    db.update(cardShows)
-      .set({ status: "ready", manifestJson: JSON.stringify(manifest), completedAt: new Date().toISOString(), error: null })
+    const now = new Date().toISOString();
+    const manifestJson = JSON.stringify(manifest);
+    const updated = db
+      .update(cardShows)
+      .set({ status: "ready", manifestJson, completedAt: now, error: null })
       .where(eq(cardShows.cardId, cardId))
       .run();
+    if (updated.changes === 0) {
+      db.insert(cardShows)
+        .values({ cardId, status: "ready", manifestJson, startedAt: now, completedAt: now, error: null })
+        .run();
+    }
     return this.getCardShow(cardId);
   }
 

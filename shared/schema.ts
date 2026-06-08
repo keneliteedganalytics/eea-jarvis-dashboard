@@ -117,7 +117,7 @@ export const settings = sqliteTable("settings", {
 // the built segment list once ready. Backward-compatible add — created lazily.
 export const cardShows = sqliteTable("card_shows", {
   cardId: integer("card_id").primaryKey(),
-  status: text("status").notNull().default("queued"), // queued|building|ready|error
+  status: text("status").notNull().default("queued"), // queued|requested|building|ready|error
   manifestJson: text("manifest_json"),
   error: text("error"),
   startedAt: text("started_at"),

@@ -74,8 +74,14 @@ export default function DailyShow() {
     );
   }
 
-  const building = show?.status === "building" || show?.status === "missing";
+  const building = show?.status === "building";
+  const empty = show?.status === "missing";
   const errored = show?.status === "error";
+
+  async function requestBuild() {
+    if (cardId == null) return;
+    await fetch(`/api/show/build/${cardId}`, { method: "POST" });
+  }
 
   return (
     <div className="p-6">
@@ -88,6 +94,21 @@ export default function DailyShow() {
           </div>
         </div>
       </div>
+
+      {empty && (
+        <div
+          className="rounded-lg border border-gold/15 bg-navy-card p-12 flex flex-col items-center justify-center gap-4 text-center"
+          data-testid="show-empty"
+        >
+          <Film className="h-8 w-8 text-gold" />
+          <div className="text-silver font-display font-bold">
+            No show built for this card yet. Tap Build Today's Show to generate one.
+          </div>
+          <Button onClick={requestBuild} data-testid="button-build-show">
+            Build Today's Show
+          </Button>
+        </div>
+      )}
 
       {building && (
         <div
