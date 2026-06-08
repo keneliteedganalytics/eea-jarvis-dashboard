@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { TierPill } from "@/components/brand/TierPill";
 import { useToast } from "@/hooks/use-toast";
 import { ChevronDown, ChevronRight, Loader2, FlaskConical } from "lucide-react";
+import FusionReplayPanel from "@/components/FusionReplayPanel";
 
 // Deep post-mortem ("answer key"): for a graded card, what we knew pre-race vs.
 // what actually happened, and the visible signals we underweighted.
@@ -381,6 +382,8 @@ export default function Postmortem() {
         </p>
       )}
       {report && <Report report={report} />}
+
+      {selectedCardId != null && <FusionReplayPanel cardId={selectedCardId} />}
     </div>
   );
 }
