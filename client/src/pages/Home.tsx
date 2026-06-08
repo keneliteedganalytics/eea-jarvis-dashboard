@@ -12,6 +12,8 @@ import { Mic, Lock, Check, RefreshCw, Printer } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { HostHero } from "@/components/brand/HostHero";
 import { TrackRecordHero } from "@/components/TrackRecordHero";
+import { DraftCardsSection } from "@/components/DraftCardsSection";
+import { PullCardModal } from "@/components/PullCardModal";
 
 function StatBox({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
   return (
@@ -80,6 +82,10 @@ export default function Home() {
     return (
       <div className="p-4 sm:p-6 max-w-[1100px] mx-auto pb-28">
         <TrackRecordHero />
+        <div className="mt-4 flex justify-end">
+          <PullCardModal />
+        </div>
+        <DraftCardsSection />
         <div className="mt-4">
           <HostHero />
         </div>
@@ -135,6 +141,7 @@ export default function Home() {
               <RefreshCw className={`h-4 w-4 mr-1.5 shrink-0 ${fetchNowMutation.isPending ? "animate-spin" : ""}`} />
               {fetchNowMutation.isPending ? "Fetching…" : "Fetch Results Now"}
             </Button>
+            <PullCardModal />
             {!card.locked ? (
               <Button
                 variant="outline"
@@ -181,6 +188,9 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* Draft cards awaiting review (above the active card's races) */}
+      <DraftCardsSection />
 
       {/* Race rows */}
       <div className="mt-4 space-y-3">

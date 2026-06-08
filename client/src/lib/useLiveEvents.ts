@@ -34,6 +34,10 @@ export function useLiveEvents() {
           // Silent in-place recompute after a voice tier change / undo.
           queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] });
           queryClient.invalidateQueries({ queryKey: ["/api/cards"] });
+        } else if (event.type === "on-demand-ingest:completed") {
+          // A draft (or partial) card just landed — refresh the Drafts section.
+          queryClient.invalidateQueries({ queryKey: ["/api/cards/drafts"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/cards"] });
         }
       } catch {
         /* ignore malformed */

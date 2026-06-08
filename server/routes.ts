@@ -40,6 +40,15 @@ import { startWeatherCron } from "./services/weather-cron";
 import { startScratchRefreshCron } from "./services/scratch-refresh-cron";
 import { refreshScratchesForCard, isScratchRefreshError } from "./services/scratch-refresh";
 import { brisnetAdminRouter } from "./routes/brisnet";
+import { runOnDemandIngest } from "./services/on-demand-ingest";
+
+// Body schema for POST /api/cards/on-demand-ingest. Track is fuzzy-resolved
+// server-side; date is validated there too (this only enforces presence/shape).
+const onDemandIngestSchema = z.object({
+  track: z.string().min(1),
+  date: z.string().min(1),
+  source: z.enum(["both", "equibase", "brisnet"]).optional(),
+});
 
 // Helper: load TTS settings (voice / model / speed) from storage.
 function ttsSettings(): { voiceId: string; modelId: string; speed: number } {
@@ -96,6 +105,31 @@ export async function registerRoutes(
     const card = storage.getArchivedCardById(id);
     if (!card) return res.status(404).json({ error: "Archived card not found" });
     res.json(card);
+  });
+
+  // Draft cards: active, unlocked cards awaiting review (from the cron or the
+  // on-demand ingest). Lightweight summaries with tier counts for the Drafts UI.
+  app.get("/api/cards/drafts", (_req, res) => {
+    const drafts = storage
+      .getActiveCards()
+      .filter((c) => !c.locked)
+      .map((c) => {
+        const full = storage.getCardWithRaces(c.id);
+        const races = full?.races ?? [];
+        const tierCount = (t: string) => races.filter((r) => r.tier === t).length;
+        return {
+          id: c.id,
+          track: c.track,
+          date: c.date,
+          raceCount: races.length,
+          cardConviction: c.cardConviction,
+          sniper: tierCount("SNIPER"),
+          edge: tierCount("EDGE"),
+          createdAt: c.createdAt,
+        };
+      })
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    res.json(drafts);
   });
 
   app.get("/api/cards/latest", (_req, res) => {
@@ -227,6 +261,18 @@ export async function registerRoutes(
     const updated = storage.updateCard(id, { locked: true });
     if (!updated) return res.status(404).json({ error: "Card not found" });
     res.json(updated);
+  });
+
+  // On-demand ingest: pull Equibase + Brisnet for an explicit track+date, run the
+  // analyze-card pipeline, and land a DRAFT card for review. Synchronous (< 5 min)
+  // so it returns the OnDemandIngestResult directly; SSE events stream progress.
+  app.post("/api/cards/on-demand-ingest", async (req, res) => {
+    const parsed = onDemandIngestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+    const result = await runOnDemandIngest(parsed.data);
+    res.status(result.status === "failed" ? 422 : 200).json(result);
   });
 
   // Discard: delete predictions + the card (cascade removes races/uploads refs).

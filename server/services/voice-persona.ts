@@ -126,6 +126,7 @@ export async function processVoiceTurn(
     card: ctx.card,
     activeRaceNumber: ctx.activeRaceNumber,
     proposals: [],
+    actions: [],
   };
   const toolsUsed: string[] = [];
 
@@ -182,7 +183,10 @@ export async function processVoiceTurn(
     "I didn't catch anything actionable there — say that again?";
 
   const proposedChanges = toolCtx.proposals;
-  const voice: VoiceName = proposedChanges.length > 0 ? "jarvis" : "scarlett";
+  const tookAction = (toolCtx.actions?.length ?? 0) > 0;
+  // Jarvis (Brian) voices ACTIONS: tier proposals awaiting confirm, and the
+  // immediate ingest/lock actions. Scarlett handles informational answers.
+  const voice: VoiceName = proposedChanges.length > 0 || tookAction ? "jarvis" : "scarlett";
 
   return {
     spokenResponse: spoken,
