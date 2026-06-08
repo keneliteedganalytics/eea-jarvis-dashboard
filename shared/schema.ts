@@ -47,6 +47,11 @@ export const races = sqliteTable("races", {
   // Editable analysis fields
   whyText: text("why_text"),
   paceText: text("pace_text"),
+
+  // Explainability for the flag-driven tier demotion (postmortem Fix 2). Holds a
+  // note like "EDGE→RECON: BOUNCE RISK on #1 (place pick)" when a flag on the
+  // win/place pick dropped the tier; null when no demotion occurred.
+  tierDemotedBy: text("tier_demoted_by"),
 });
 
 // ── One row per race result the user logs ─────────────────────────────────

@@ -38,8 +38,29 @@ export interface FusedHorse {
   eeapFit: number | null;
   eeac: number | null;
   eeaRating: number | null;
+  // Morning-line odds as a decimal (e.g. "6-1" → 6, "9-2" → 4.5). Null when the
+  // source carries no parseable ML. Used by the longshot co-top promotion check.
+  mlOdds: number | null;
   rank: number;
   flags: string[];
+}
+
+// Parse a morning-line string ("6-1", "9-2", "7/2", "5", "EVN") into a decimal
+// odds multiple. Returns null when nothing parseable is present.
+export function parseMlOdds(ml: string | null | undefined): number | null {
+  if (ml == null) return null;
+  const s = ml.trim().toLowerCase();
+  if (!s) return null;
+  if (s === "evn" || s === "even" || s === "ev") return 1;
+  const frac = s.match(/^(\d+(?:\.\d+)?)\s*[-/]\s*(\d+(?:\.\d+)?)$/);
+  if (frac) {
+    const num = parseFloat(frac[1]);
+    const den = parseFloat(frac[2]);
+    if (den > 0) return Math.round((num / den) * 100) / 100;
+  }
+  const whole = s.match(/^(\d+(?:\.\d+)?)$/);
+  if (whole) return parseFloat(whole[1]);
+  return null;
 }
 
 export interface FusedRace {
@@ -219,7 +240,8 @@ export function fuseRace(
     const { eeas, flags } = computeEeas(slot.b, slot.e, weights.eeas);
     const eeap = computeEeap(slot.b, slot.e, weights.eeap);
     const eeac = computeEeac(slot.b, slot.e, conditions, weights.eeac);
-    return { pgm, name: slot.name, b: slot.b, e: slot.e, eeas, eeap, eeac, flags };
+    const mlOdds = parseMlOdds(slot.b?.ml);
+    return { pgm, name: slot.name, b: slot.b, e: slot.e, eeas, eeap, eeac, mlOdds, flags };
   });
 
   // Determine pace shape from EEAP distribution (who projects to be on the lead).
@@ -256,6 +278,7 @@ export function fuseRace(
       eeapFit,
       eeac: h.eeac,
       eeaRating,
+      mlOdds: h.mlOdds,
       rank: 0,
       flags,
     };
