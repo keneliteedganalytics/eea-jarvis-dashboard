@@ -24,11 +24,30 @@ app.get("/healthz", (_req, res) => {
 // except /healthz so Railway's edge probe stays unauthenticated.
 const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER || "";
 const BASIC_AUTH_PASS = process.env.BASIC_AUTH_PASS || "";
+// Public, unauthenticated paths. Kept deliberately tiny: the marketing
+// track-record page, its aggregate-only API, and the OG share image. Matched
+// by EXACT path so data routes like /api/cards are never whitelisted.
+const PUBLIC_PATHS = new Set([
+  "/healthz",
+  "/track-record",
+  "/api/public/track-record",
+  "/og-track-record.svg", // OG share image — social crawlers fetch it unauthenticated
+  "/favicon.png",
+]);
+// The public page is a client-rendered SPA, so its static bundle (the hashed
+// JS/CSS Vite emits under /assets) must load unauthenticated or the page stays
+// blank for the public. The bundle is just application code — it carries NO
+// secrets and NO data; everything sensitive stays behind the auth-gated /api/*
+// routes (only /api/public/track-record is open, and it is aggregate-only).
+// This is the single prefix exception; everything else remains exact-match.
+function isPublicPath(p: string): boolean {
+  return PUBLIC_PATHS.has(p) || p.startsWith("/assets/");
+}
 if (BASIC_AUTH_USER && BASIC_AUTH_PASS) {
   const expectedUser = Buffer.from(BASIC_AUTH_USER);
   const expectedPass = Buffer.from(BASIC_AUTH_PASS);
   app.use((req, res, next) => {
-    if (req.path === "/healthz") return next();
+    if (isPublicPath(req.path)) return next();
     const header = req.headers.authorization || "";
     if (!header.startsWith("Basic ")) {
       res.set("WWW-Authenticate", 'Basic realm="EEA Jarvis", charset="UTF-8"');

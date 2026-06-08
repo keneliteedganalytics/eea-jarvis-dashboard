@@ -22,6 +22,7 @@ import Historical from "@/pages/Historical";
 import HistoricalCard from "@/pages/HistoricalCard";
 import DailyShow from "@/pages/DailyShow";
 import About from "@/pages/About";
+import TrackRecord from "@/pages/TrackRecord";
 
 function AppRouter() {
   return (
@@ -48,6 +49,8 @@ function Shell() {
       {/* Standalone printable page — no app chrome, no Jarvis player. */}
       <Route path="/print/:id" component={Print} />
       <Route path="/print" component={Print} />
+      {/* Public marketing page — no auth, no app chrome. */}
+      <Route path="/track-record" component={TrackRecord} />
       <Route>
         <AppLayout>
           <AppRouter />

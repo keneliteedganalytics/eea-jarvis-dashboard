@@ -374,6 +374,33 @@ export async function registerRoutes(
     res.json(buildLifetimeStats());
   });
 
+  // ── Public track record (NO AUTH) ─────────────────────────────────────────
+  // Powers the public /track-record marketing page. Returns aggregate-only
+  // lifetime stats: totals + a by-track breakdown ordered by races graded.
+  // Deliberately exposes NO picks, NO horse names, and NO race-level detail —
+  // it is built from buildLifetimeStats(), which only ever emits aggregates.
+  // This path is whitelisted in the basic-auth middleware (server/index.ts).
+  app.get("/api/public/track-record", (_req, res) => {
+    const { totals, byTrack } = buildLifetimeStats();
+    const ranked = [...byTrack].sort(
+      (a, b) => b.graded - a.graded || b.races - a.races || a.track.localeCompare(b.track),
+    );
+    res.set("Cache-Control", "public, max-age=300");
+    res.json({
+      totals: {
+        cards: totals.cards,
+        races: totals.races,
+        graded: totals.graded,
+        win: totals.win,
+        place: totals.place,
+        show: totals.show,
+        itm: totals.itm,
+      },
+      byTrack: ranked,
+      generatedAt: new Date().toISOString(),
+    });
+  });
+
   // ── Jarvis (TTS) ─────────────────────────────────────────────────────────
   app.post("/api/jarvis/brief-card", async (_req, res) => {
     const card = storage.getLatestCard();
