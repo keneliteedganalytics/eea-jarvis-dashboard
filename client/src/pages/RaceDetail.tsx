@@ -1,12 +1,11 @@
 import { useParams, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import type { CardWithRaces, RaceWithResult, Settings } from "@shared/schema";
+import type { CardWithRaces, RaceWithResult } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { TierPill } from "@/components/brand/TierPill";
 import { ScopeLogo } from "@/components/brand/ScopeLogo";
 import { useJarvis } from "@/lib/jarvis";
-import { suggestedWagers } from "@/lib/wagers";
 import { tierOf } from "@/lib/tiers";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -141,7 +140,6 @@ export default function RaceDetail() {
   const params = useParams();
   const n = parseInt(params.n ?? "1", 10);
   const { data: card, isLoading } = useQuery<CardWithRaces>({ queryKey: ["/api/cards/latest"] });
-  const { data: settings } = useQuery<Settings>({ queryKey: ["/api/settings"] });
   const jarvis = useJarvis();
 
   if (isLoading || !card) {
@@ -160,8 +158,9 @@ export default function RaceDetail() {
 
   const cfg = tierOf(race.tier);
   const flags = JSON.parse(race.flags || "[]") as string[];
-  const wagers = settings ? suggestedWagers(race, settings) : [];
+  const bets = race.bets;
   const order = race.result ? (JSON.parse(race.result.finishOrder) as string[]) : null;
+  const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
   return (
     <div className="p-4 sm:p-6 max-w-[1400px] mx-auto pb-28">
@@ -226,14 +225,24 @@ export default function RaceDetail() {
           </div>
 
           <div className="rounded-lg border border-gold/15 bg-navy-section p-4">
-            <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-2">Suggested Wagers</div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-2">
+              Suggested Wagers
+              {bets && !bets.pass && bets.raceAllocation > 0
+                ? ` · ${money(bets.raceAllocation)}`
+                : ""}
+            </div>
             <div className="space-y-2">
-              {wagers.map((w, i) => (
-                <div key={i} className="flex items-start gap-2 text-xs" data-testid={`wager-${i}`}>
-                  <span className="shrink-0 rounded bg-gold/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gold font-display font-bold">{w.label}</span>
-                  <span className="text-silver tabular-nums">{w.detail}</span>
-                </div>
-              ))}
+              {!bets || bets.pass || bets.legs.length === 0 ? (
+                <div className="text-xs text-silver" data-testid="wager-pass">PASS — no playable edge.</div>
+              ) : (
+                bets.legs.map((leg, i) => (
+                  <div key={i} className="flex items-start gap-2 text-xs" data-testid={`wager-${i}`}>
+                    <span className="shrink-0 rounded bg-gold/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gold font-display font-bold">{leg.type}</span>
+                    <span className="text-silver tabular-nums flex-1">{leg.structure}</span>
+                    <span className="text-silver tabular-nums shrink-0">{money(leg.cost)}</span>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 

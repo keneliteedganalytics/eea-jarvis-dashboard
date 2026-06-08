@@ -299,7 +299,27 @@ export type Settings = typeof settings.$inferSelect;
 export type InsertSettings = z.infer<typeof insertSettingsSchema>;
 export type AudioCache = typeof audioCache.$inferSelect;
 
-export type RaceWithResult = Race & { result?: Result | null };
+// Server-built Suggested Wagers, attached to every race the API returns so the
+// Race Detail view and the Print sheet render byte-identical numbers. Mirrors
+// the RaceBets shape produced by server/services/wagers.ts (kept structural to
+// avoid a server import in shared/client code).
+export interface RaceWagerLeg {
+  type: string;
+  structure: string;
+  horses: string[];
+  cost: number;
+}
+export interface RaceWagers {
+  tier: string;
+  raceAllocation: number;
+  pass: boolean;
+  legs: RaceWagerLeg[];
+}
+
+export type RaceWithResult = Race & {
+  result?: Result | null;
+  bets?: RaceWagers;
+};
 export type CardWithRaces = Card & { races: RaceWithResult[] };
 
 // ── Historical archive ────────────────────────────────────────────────────
