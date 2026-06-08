@@ -201,9 +201,25 @@ export async function loginBrisnet(
   let setLines = mergeSetCookies(jar, res.headers);
   debug("login POST", LOGIN_URL, "->", res.status, {
     location: res.headers.get("location"),
+    allow: res.headers.get("allow"),
     setCookies: parseSetCookies(setLines).size,
     jar: Array.from(jar.keys()),
   });
+
+  // 405 Method Not Allowed: the login path no longer accepts POST. The PR #27
+  // B1 probe showed brisnet.com/product/* migrated to an Akamai object store
+  // that answers `Allow: GET, HEAD, OPTIONS` — the POST login form is gone.
+  // Surface this precisely instead of retrying a method the server rejects.
+  if (res.status === 405) {
+    const allow = res.headers.get("allow") || "";
+    if (!/post/i.test(allow)) {
+      throw new Error(
+        `Brisnet login endpoint no longer accepts POST (HTTP 405; Allow: ${allow || "n/a"}). ` +
+          `The /product/login form appears to have moved to object storage — the ` +
+          `automated login is no longer available.`,
+      );
+    }
+  }
 
   let url = LOGIN_URL;
   for (let hop = 0; hop < MAX_LOGIN_HOPS; hop++) {
@@ -443,10 +459,12 @@ export async function ingestForDate(
   ).map((c) => c.toUpperCase());
   const raceDateStr = formatRaceDateParam(raceDate);
 
-  const username = process.env.BRISNET_USERNAME;
-  const password = process.env.BRISNET_PASSWORD;
+  // Accept the documented BRISNET_USER/BRISNET_PASS names, falling back to the
+  // older BRISNET_USERNAME/BRISNET_PASSWORD the module originally read.
+  const username = process.env.BRISNET_USER || process.env.BRISNET_USERNAME;
+  const password = process.env.BRISNET_PASS || process.env.BRISNET_PASSWORD;
   if (!username || !password) {
-    const error = "BRISNET_USERNAME / BRISNET_PASSWORD not set";
+    const error = "BRISNET_USER / BRISNET_PASS not set";
     const completedAt = new Date().toISOString();
     logRun({
       raceDate: raceDateStr,

@@ -20,7 +20,13 @@ import { sqlite } from "../db";
 import { parseEquibaseText, pdfToLayoutText } from "./parsers/equibase";
 import type { EquibaseCard } from "./parsers/types";
 
-const LOGIN_URL = "https://www.equibase.com/premium/eebCustomerLogon.cfm";
+// The login FORM (display) page — GET it first to seed the Incapsula/CMP
+// cookies (COOKIE_TEST, visid_incap_*, incap_ses_*) the ColdFusion app checks.
+const LOGIN_FORM_URL = "https://www.equibase.com/premium/eebCustomerLogon.cfm";
+// The ACTUAL auth endpoint. The old code POSTed to the form page above with the
+// wrong field names, which just re-rendered the form and never authenticated
+// (confirmed by the PR #27 B1 live probe). This is where credentials go.
+const LOGIN_ACTION_URL = "https://www.equibase.com/premium/eebCustomerLogonAction.cfm";
 const PP_PAGE_URL = "https://www.equibase.com/premium/eqpEquibaseFullPP.cfm";
 const DOWNLOAD_BASE = "https://www.equibase.com/premium/eebDownloadFPPProgram.cfm";
 const PRODUCT_ID = "50300";
@@ -256,41 +262,61 @@ export async function loginEquibase(
   username: string,
   password: string,
 ): Promise<CookieJar> {
-  const body = new URLSearchParams({
-    username,
-    password,
-    // ColdFusion login forms commonly post these; harmless if ignored.
-    login: "Login",
-    rememberMe: "Y",
+  const jar: CookieJar = new Map();
+
+  // 1) GET the login form first so Incapsula / the CMP seed their cookies
+  //    (COOKIE_TEST, visid_incap_*, incap_ses_*). The CF action below checks
+  //    for COOKIE_TEST and bounces to eebErrorNoCookies.cfm without it.
+  const form = await fetch(LOGIN_FORM_URL, {
+    method: "GET",
+    redirect: "manual",
+    headers: { "User-Agent": USER_AGENT },
+  });
+  mergeSetCookies(jar, form.headers);
+  debug("login GET form", LOGIN_FORM_URL, "->", form.status, {
+    jar: Array.from(jar.keys()),
   });
 
-  const jar: CookieJar = new Map();
-  let res = await fetch(LOGIN_URL, {
+  // 2) POST credentials to the real action endpoint with the field names the CF
+  //    form actually submits (user_id / customer_password / continue_button).
+  const body = new URLSearchParams({
+    user_id: username,
+    customer_password: password,
+    continue_button: "Continue",
+  });
+  let res = await fetch(LOGIN_ACTION_URL, {
     method: "POST",
     redirect: "manual",
     headers: {
       "User-Agent": USER_AGENT,
       "Content-Type": "application/x-www-form-urlencoded",
+      Cookie: cookieHeader(jar),
+      Referer: LOGIN_FORM_URL,
     },
     body: body.toString(),
   });
   let setLines = mergeSetCookies(jar, res.headers);
-  debug("login POST", LOGIN_URL, "->", res.status, {
+  debug("login POST", LOGIN_ACTION_URL, "->", res.status, {
     location: res.headers.get("location"),
     setCookies: parseSetCookies(setLines).size,
     jar: Array.from(jar.keys()),
   });
-  if (process.env.EQUIBASE_DEBUG === "1") {
-    const peek = (await res.clone().text()).slice(0, 500);
-    debug("login body[0..500]:", peek);
-  }
 
   // Follow redirects manually, carrying the jar and capturing cookies per hop.
-  let url = LOGIN_URL;
+  // Bail out the moment CF redirects to its "no cookies" / error page — that's
+  // the Incapsula bot-wall, not a transient hop.
+  let url = LOGIN_ACTION_URL;
   for (let hop = 0; hop < MAX_LOGIN_HOPS; hop++) {
     const status = res.status;
     const location = res.headers.get("location");
     if (status < 300 || status >= 400 || !location) break;
+    if (/eebErrorNoCookies\.cfm/i.test(location)) {
+      throw new Error(
+        "Equibase login blocked by bot protection (Incapsula): the login action " +
+          "redirected to eebErrorNoCookies.cfm. A headless fetch cannot pass the " +
+          "JS cookie challenge — use manual PP upload or an anti-bot fetch path.",
+      );
+    }
     url = new URL(location, url).toString();
     res = await fetch(url, {
       method: "GET",
@@ -307,8 +333,9 @@ export async function loginEquibase(
 
   if (!jar.has("CFID") && !jar.has("CFTOKEN") && !jar.has("JSESSIONID")) {
     throw new Error(
-      `Equibase login did not set a session cookie (HTTP ${res.status}; ` +
-        `set EQUIBASE_DEBUG=1 to dump the redirect chain)`,
+      `Equibase login did not set a session cookie (HTTP ${res.status}). The ` +
+        `premium login is behind Incapsula bot protection + a consent gate that a ` +
+        `headless fetch cannot clear; set EQUIBASE_DEBUG=1 to dump the redirect chain.`,
     );
   }
   return jar;
@@ -428,10 +455,12 @@ export async function ingestForDate(
   );
   const raceDateStr = formatRaceDateParam(raceDate);
 
-  const username = process.env.EQUIBASE_USERNAME;
-  const password = process.env.EQUIBASE_PASSWORD;
+  // Accept the documented EQUIBASE_USER/EQUIBASE_PASS names, falling back to the
+  // older EQUIBASE_USERNAME/EQUIBASE_PASSWORD the module originally read.
+  const username = process.env.EQUIBASE_USER || process.env.EQUIBASE_USERNAME;
+  const password = process.env.EQUIBASE_PASS || process.env.EQUIBASE_PASSWORD;
   if (!username || !password) {
-    const error = "EQUIBASE_USERNAME / EQUIBASE_PASSWORD not set";
+    const error = "EQUIBASE_USER / EQUIBASE_PASS not set";
     const completedAt = new Date().toISOString();
     logRun({
       raceDate: raceDateStr,

@@ -26,3 +26,7 @@ database.db
 database.db-shm
 database.db-wal
 database.db-journal
+
+# Local ingest data dirs (PP PDFs / DRM zips / per-run config)
+server/equibase-pps/
+server/brisnet-drm/

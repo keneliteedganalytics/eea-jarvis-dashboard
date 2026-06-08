@@ -311,7 +311,11 @@ export async function registerRoutes(
       return res.status(400).json({ error: parsed.error.flatten() });
     }
     const result = await runOnDemandIngest(parsed.data);
-    res.status(result.status === "failed" ? 422 : 200).json(result);
+    // Always 200 with the structured OnDemandIngestResult — including the failed
+    // case — so the client can render per-source diagnostics (which source failed
+    // and why) instead of a bare thrown error. The body's `status` field carries
+    // success / partial / failed.
+    res.status(200).json(result);
   });
 
   // Discard: delete predictions + the card (cascade removes races/uploads refs).
