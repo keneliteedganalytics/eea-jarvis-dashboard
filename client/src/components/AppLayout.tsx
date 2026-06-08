@@ -13,6 +13,7 @@ import {
   Archive,
   Users,
   Film,
+  Globe,
   Settings as SettingsIcon,
   Menu,
 } from "lucide-react";
@@ -27,6 +28,7 @@ const NAV = [
   { href: "/historical", label: "Historical", icon: Archive, testid: "nav-historical", match: "/historical" },
   { href: "/show", label: "Daily Show", icon: Film, testid: "link-daily-show" },
   { href: "/about", label: "Meet the Team", icon: Users, testid: "link-about" },
+  { href: "/track-record", label: "Track Record", icon: Globe, testid: "link-track-record" },
   { href: "/settings", label: "Settings", icon: SettingsIcon, testid: "nav-settings" },
 ];
 

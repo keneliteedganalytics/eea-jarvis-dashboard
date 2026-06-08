@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="EEA Jarvis Track Record">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a1020"/>
+      <stop offset="1" stop-color="#0d1526"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e7c873"/>
+      <stop offset="1" stop-color="#c9a24b"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1200" height="6" fill="url(#gold)"/>
+  <text x="80" y="120" font-family="Georgia, serif" font-size="30" letter-spacing="6" fill="#c9a24b">ELITE EDGE ANALYTICS</text>
+  <text x="80" y="230" font-family="Arial, sans-serif" font-weight="800" font-size="76" fill="#e8eaf0">Track Record</text>
+  <text x="80" y="300" font-family="Arial, sans-serif" font-size="30" fill="#8b96a8">Every pick. Every postmortem. Public.</text>
+  <g font-family="Arial, sans-serif" text-anchor="middle">
+    <text x="200" y="470" font-weight="800" font-size="90" fill="#e7c873">2</text>
+    <text x="200" y="520" font-size="24" letter-spacing="3" fill="#8b96a8">CARDS</text>
+    <text x="470" y="470" font-weight="800" font-size="90" fill="#e7c873">19</text>
+    <text x="470" y="520" font-size="24" letter-spacing="3" fill="#8b96a8">RACES</text>
+    <text x="740" y="470" font-weight="800" font-size="90" fill="#e7c873">27%</text>
+    <text x="740" y="520" font-size="24" letter-spacing="3" fill="#8b96a8">WIN</text>
+    <text x="1010" y="470" font-weight="800" font-size="90" fill="#e7c873">100%</text>
+    <text x="1010" y="520" font-size="24" letter-spacing="3" fill="#8b96a8">ITM</text>
+  </g>
+</svg>

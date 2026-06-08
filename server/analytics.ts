@@ -154,6 +154,7 @@ export interface LifetimeTrackRow {
   graded: number;
   win: number | null;
   itm: number | null;
+  lastUpdated: string | null;
 }
 export interface LifetimeStats {
   totals: LifetimeTotals;
@@ -234,6 +235,10 @@ export function buildLifetimeStats(): LifetimeStats {
       const trackCards = byTrackMap.get(track)!;
       const trackRaces = trackCards.flatMap((c) => c.races);
       const t = tally(trackRaces);
+      const lastUpdated = trackCards
+        .map((c) => c.date)
+        .sort()
+        .at(-1) ?? null;
       return {
         track,
         cards: trackCards.length,
@@ -241,6 +246,7 @@ export function buildLifetimeStats(): LifetimeStats {
         graded: t.graded,
         win: t.win,
         itm: t.itm,
+        lastUpdated,
       };
     });
 
