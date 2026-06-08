@@ -1,4 +1,5 @@
 import type { Race, Result, CardWithRaces, Settings } from "@shared/schema";
+import { pluralize, numberWord } from "./text";
 
 function capitalize(s: string): string {
   if (!s) return s;
@@ -9,6 +10,16 @@ function tierWord(tier: string): string {
   if (tier === "DUAL") return "Dual top";
   if (tier === "PASS") return "Pass";
   return `${capitalize(tier)}`;
+}
+
+// Render a tier-count list for the spoken brief with natural plural agreement.
+// Each entry is [count, singular, plural?]. Zero-count tiers are dropped so we
+// never say "0 snipers"; if every tier is empty we fall back to "no plays".
+function tierDistribution(entries: [number, string, string?][]): string {
+  const parts = entries
+    .filter(([n]) => n > 0)
+    .map(([n, singular, plural]) => pluralize(n, singular, plural));
+  return parts.length ? parts.join(", ") : "no plays";
 }
 
 function formatDate(date: string): string {
@@ -60,8 +71,12 @@ export function cardBriefingScript(card: CardWithRaces): string {
 
   return [
     `Good morning. ${card.track}, ${formatDate(card.date)}.`,
-    `${card.races.length} races on the card. Card conviction: ${card.cardConviction}.`,
-    `${sniperCount} Snipers, ${edgeCount} Edges, ${passCount} Pass.`,
+    `${pluralize(card.races.length, "race")} on the card. Card conviction: ${card.cardConviction}.`,
+    `${tierDistribution([
+      [sniperCount, "Sniper"],
+      [edgeCount, "Edge"],
+      [passCount, "Pass", "Pass"],
+    ])}.`,
     topRace
       ? `Play of the day: Race ${topRace.raceNumber}. ${topRace.conditions}. ${topRace.shape}.`
       : "",
@@ -128,13 +143,23 @@ export interface CardStats {
   flagsRaised: number;
 }
 
+// "Sniper tier: 1 of 3." with natural agreement, or "" when the tier had no
+// plays (we don't recap a tier we never bet).
+function tierHitLine(label: string, hits: number, count: number): string {
+  if (count === 0) return "";
+  return `${label} tier: ${numberWord(hits)} of ${numberWord(count)}.`;
+}
+
 export function cardSummaryScript(card: CardWithRaces, stats: CardStats): string {
   return [
     `Card complete.`,
-    `${card.races.length} races. ${stats.winsHit} wins, ${stats.itmHit} in the money.`,
-    `Sniper tier: ${stats.sniperHits} of ${stats.sniperCount}. Edge tier: ${stats.edgeHits} of ${stats.edgeCount}.`,
+    `${pluralize(card.races.length, "race")}. ${pluralize(stats.winsHit, "win")}, ${pluralize(stats.itmHit, "pick")} in the money.`,
+    tierHitLine("Sniper", stats.sniperHits, stats.sniperCount),
+    tierHitLine("Edge", stats.edgeHits, stats.edgeCount),
     `ROI on the day: ${stats.roi >= 0 ? "plus" : "minus"} ${Math.abs(stats.roi).toFixed(0)} percent.`,
-    stats.flagsHit > 0 ? `Flag accuracy: ${stats.flagsHit} of ${stats.flagsRaised} played correctly.` : "",
+    stats.flagsRaised > 0
+      ? `Flag accuracy: ${numberWord(stats.flagsHit)} of ${pluralize(stats.flagsRaised, "flag")} played correctly.`
+      : "",
     `See you tomorrow.`,
   ]
     .filter(Boolean)
