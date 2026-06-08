@@ -49,6 +49,7 @@ import { db } from "./db";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { gradeRace, gradeFlags } from "./grading";
 import { DEFAULT_WEIGHTS, PERSONA_V1 } from "./services/eea-config";
+import { buildWagers } from "./services/wagers";
 
 export interface IStorage {
   // Cards
@@ -164,9 +165,14 @@ export class DatabaseStorage implements IStorage {
       .where(eq(races.cardId, card.id))
       .all()
       .sort((a, b) => a.raceNumber - b.raceNumber);
+    // Build Suggested Wagers from the single source of truth so every surface
+    // (Race Detail, Print) renders identical numbers off the same race rows.
+    const s = this.getSettings();
+    const racesOnCard = raceRows.length;
     const withResults: RaceWithResult[] = raceRows.map((r) => ({
       ...r,
       result: this.getResultByRace(r.id) ?? null,
+      bets: buildWagers(r, { bankroll: s.bankroll, dailyRiskCapPct: s.dailyRiskCapPct }, racesOnCard),
     }));
     return { ...card, races: withResults };
   }

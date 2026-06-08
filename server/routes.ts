@@ -19,7 +19,6 @@ import { z } from "zod";
 import { analyzeCard } from "./services/analyze-card";
 import { backfillNullScoreCards, sweepArchive } from "./services/card-finishing";
 import { getOrFetchBias, fetchBias } from "./services/bias-fetcher";
-import { sizeRaceBets } from "./services/bet-sizer";
 import { getOrGenerateRaceSummary } from "./services/race-summary";
 import { buildAnalyticsSummary, buildCardStats, buildLifetimeStats } from "./analytics";
 import {
@@ -272,18 +271,12 @@ export async function registerRoutes(
       const settings = storage.getSettings();
       const racesOnCard = card.races.length;
       const dailyCap = settings.bankroll * settings.dailyRiskCapPct;
+      // Wagers are already built on each race by storage.withRaces (the single
+      // source of truth shared with Race Detail). Print only layers in the
+      // cached race summary on top.
       const races = card.races.map((r) => {
-        const top = [r.winPgm, r.placePgm, r.showPgm, r.fourthPgm].filter(
-          (p): p is string => !!p,
-        );
-        const bets = sizeRaceBets({
-          tier: r.tier,
-          racesOnCard,
-          settings: { bankroll: settings.bankroll, dailyRiskCapPct: settings.dailyRiskCapPct },
-          top,
-        });
         const cached = storage.getRaceSummary(r.id);
-        return { ...r, bets, summary: cached?.summary ?? null };
+        return { ...r, summary: cached?.summary ?? null };
       });
       res.json({
         ...card,
