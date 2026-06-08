@@ -41,6 +41,11 @@ import { startScratchRefreshCron } from "./services/scratch-refresh-cron";
 import { refreshScratchesForCard, isScratchRefreshError } from "./services/scratch-refresh";
 import { brisnetAdminRouter } from "./routes/brisnet";
 import { runOnDemandIngest } from "./services/on-demand-ingest";
+import {
+  runDeepPostmortem,
+  runDeepPostmortemToday,
+  getDeepPostmortem,
+} from "./services/deep-postmortem";
 
 // Body schema for POST /api/cards/on-demand-ingest. Track is fuzzy-resolved
 // server-side; date is validated there too (this only enforces presence/shape).
@@ -261,6 +266,39 @@ export async function registerRoutes(
     const updated = storage.updateCard(id, { locked: true });
     if (!updated) return res.status(404).json({ error: "Card not found" });
     res.json(updated);
+  });
+
+  // ── PR #25: Deep post-mortem ("answer key") ───────────────────────────────
+  // Run the brutally-objective deep analysis for one card and return the report.
+  app.post("/api/cards/:id/deep-postmortem", async (req, res) => {
+    const id = Number(req.params.id);
+    if (!storage.getCard(id)) return res.status(404).json({ error: "Card not found" });
+    try {
+      const report = await runDeepPostmortem(id);
+      res.json(report);
+    } catch (e) {
+      console.error(`[deep-postmortem] failed for card ${id}:`, e);
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  // Latest saved deep post-mortem for a card. 404 if it was never run.
+  app.get("/api/cards/:id/deep-postmortem", (req, res) => {
+    const id = Number(req.params.id);
+    const report = getDeepPostmortem(id);
+    if (!report) return res.status(404).json({ error: "No deep post-mortem for this card" });
+    res.json(report);
+  });
+
+  // Run the deep post-mortem for every graded card from today. Returns an array.
+  app.post("/api/postmortem/today", async (req, res) => {
+    try {
+      const reports = await runDeepPostmortemToday();
+      res.json(reports);
+    } catch (e) {
+      console.error(`[deep-postmortem] today run failed:`, e);
+      res.status(500).json({ error: (e as Error).message });
+    }
   });
 
   // On-demand ingest: pull Equibase + Brisnet for an explicit track+date, run the

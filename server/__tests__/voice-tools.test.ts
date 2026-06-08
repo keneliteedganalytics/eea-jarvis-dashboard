@@ -17,8 +17,14 @@ import {
   getPostmortems,
   getBiasToday,
   getOtbFingerLakesStatus,
+  runDeepPostmortemTool,
+  getDeepPostmortemTool,
   type ToolContext,
 } from "../services/voice-tools";
+import {
+  runDeepPostmortem as mockedRunDeep,
+  runDeepPostmortemToday as mockedRunDeepToday,
+} from "../services/deep-postmortem";
 
 // ── Mock the weather service so get_track_weather is deterministic + offline ──
 vi.mock("../services/weather", () => ({
@@ -94,6 +100,31 @@ vi.mock("../services/otb-finger-lakes", () => ({
     purses: [],
     fetchedAt: "2026-06-08T18:00:00.000Z",
   })),
+}));
+
+// ── Mock the deep-postmortem analyzer so the voice tools are offline ─────────
+const deepReport = {
+  cardId: 1,
+  track: "Saratoga",
+  date: "2026-06-07",
+  generatedAt: "2026-06-08T18:00:00.000Z",
+  summary: {
+    raceCount: 3,
+    graded: 2,
+    winRate: 50,
+    itmRate: 50,
+    roi: 1.2,
+    bestCall: { raceNumber: 2, tier: "SNIPER", runner: "Tapit Trice", reason: "right read" },
+    worstMiss: { raceNumber: 3, ourPick: "Curlins Pride", actualWinner: "Longshot", visibleSignal: "speed figs" },
+  },
+  races: [],
+  lessons: ["Tighten SNIPER discipline on dirt routes."],
+  systemicFlags: ["Top-pick discipline: leaning on the wrong favorite."],
+};
+vi.mock("../services/deep-postmortem", () => ({
+  runDeepPostmortem: vi.fn(async () => deepReport),
+  runDeepPostmortemToday: vi.fn(async () => [deepReport]),
+  getDeepPostmortem: vi.fn((cardId: number) => (cardId === 1 ? deepReport : null)),
 }));
 
 const cardsStore: any[] = [];
@@ -429,5 +460,52 @@ describe("PR #23 Q&A handlers — shape + offline", () => {
     expect(pnl.date).toBe(today);
     const otb = (await runTool("get_otb_finger_lakes_status", {}, ctx())) as any;
     expect(otb.available).toBe(true);
+  });
+});
+
+// ── PR #25 deep post-mortem voice tools (analyzer mocked) ────────────────────
+describe("PR #25 deep post-mortem voice tools", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("run_deep_postmortem (today) returns a short spoken summary + page pointer", async () => {
+    const out = (await runDeepPostmortemTool({ scope: "today" }, ctx())) as any;
+    expect(mockedRunDeepToday).toHaveBeenCalledOnce();
+    expect(out.count).toBe(1);
+    expect(out.cards[0].topLesson).toMatch(/SNIPER/);
+    expect(out.note).toMatch(/Postmortem page/i);
+  });
+
+  it("run_deep_postmortem (card) runs one card and summarizes it", async () => {
+    const out = (await runDeepPostmortemTool({ scope: "card", cardId: 1 }, ctx())) as any;
+    expect(mockedRunDeep).toHaveBeenCalledWith(1);
+    expect(out.cardId).toBe(1);
+    expect(out.summary.graded).toBe(2);
+    expect(out.note).toMatch(/Postmortem page/i);
+  });
+
+  it("get_deep_postmortem returns the saved report for a card", () => {
+    const out = getDeepPostmortemTool({ cardId: 1 }, ctx()) as any;
+    expect(out.cardId).toBe(1);
+    expect(out.topLesson).toMatch(/SNIPER/);
+  });
+
+  it("get_deep_postmortem notes when none saved", () => {
+    const out = getDeepPostmortemTool({ cardId: 42 }, ctx()) as any;
+    expect(out.note).toMatch(/run one first/i);
+  });
+
+  it("the deep-postmortem tools never push to ctx.actions (stay on Scarlett)", async () => {
+    const c = ctx();
+    (c as any).actions = [];
+    await runDeepPostmortemTool({ scope: "today" }, c);
+    getDeepPostmortemTool({ cardId: 1 }, c);
+    expect((c as any).actions).toHaveLength(0);
+  });
+
+  it("runTool dispatches the deep-postmortem tools", async () => {
+    const ran = (await runTool("run_deep_postmortem", { scope: "today" }, ctx())) as any;
+    expect(ran.count).toBe(1);
+    const got = (await runTool("get_deep_postmortem", { cardId: 1 }, ctx())) as any;
+    expect(got.cardId).toBe(1);
   });
 });

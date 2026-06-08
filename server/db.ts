@@ -272,6 +272,16 @@ CREATE TABLE IF NOT EXISTS brisnet_horse_data (
   UNIQUE (race_date, track_code, race_number, program_number)
 );
 
+-- Deep post-mortem ("answer key") report, one row per card (PR #25). payload
+-- holds the full DeepPostmortem JSON. card_id is UNIQUE so re-running the
+-- analyzer for a card overwrites the prior row (idempotent upsert).
+CREATE TABLE IF NOT EXISTS deep_postmortems (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  card_id INTEGER NOT NULL UNIQUE REFERENCES cards(id) ON DELETE CASCADE,
+  generated_at TEXT NOT NULL,
+  payload TEXT NOT NULL
+);
+
 -- Per-race weather forecast (PR #18). One row per race_id, persisted for
 -- backtesting. surface_impact='unknown' means OpenWeather was unreachable and
 -- the engine left every pick untouched. Numeric fields are nullable for that
