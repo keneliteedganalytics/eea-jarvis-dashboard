@@ -20,3 +20,9 @@ server/audio_cache/
 # proprietary Brisnet/Equibase data — never commit)
 uploads/
 test-fixtures/
+
+# Local SQLite dev DB
+database.db
+database.db-shm
+database.db-wal
+database.db-journal

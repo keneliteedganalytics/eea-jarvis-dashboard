@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Mic, Lock, Check, RefreshCw, Printer } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { UploadCard } from "@/components/UploadCard";
+import { HostHero } from "@/components/brand/HostHero";
 
 function StatBox({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
   return (
@@ -64,13 +65,24 @@ export default function Home() {
     },
   });
 
-  if (isLoading || !card) {
+  if (isLoading) {
     return (
       <div className="p-6 space-y-4">
         <Skeleton className="h-32 w-full" />
         {Array.from({ length: 6 }).map((_, i) => (
           <Skeleton key={i} className="h-24 w-full" />
         ))}
+      </div>
+    );
+  }
+
+  if (!card) {
+    return (
+      <div className="p-4 sm:p-6 max-w-[1100px] mx-auto pb-28">
+        <HostHero />
+        <div className="mt-4">
+          <UploadCard />
+        </div>
       </div>
     );
   }

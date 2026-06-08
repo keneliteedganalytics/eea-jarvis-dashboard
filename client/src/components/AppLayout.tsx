@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { CardWithRaces } from "@shared/schema";
 import { ScopeLogo } from "@/components/brand/ScopeLogo";
 import { Wordmark } from "@/components/brand/Wordmark";
+import { HostAvatars } from "@/components/brand/HostAvatars";
 import { cn } from "@/lib/utils";
 import {
   LayoutGrid,
@@ -10,6 +11,7 @@ import {
   ClipboardCheck,
   TrendingUp,
   Archive,
+  Users,
   Settings as SettingsIcon,
   Menu,
 } from "lucide-react";
@@ -22,6 +24,7 @@ const NAV = [
   { href: "/results", label: "Results", icon: ClipboardCheck, testid: "nav-results" },
   { href: "/analytics", label: "Analytics", icon: TrendingUp, testid: "nav-analytics" },
   { href: "/historical", label: "Historical", icon: Archive, testid: "nav-historical", match: "/historical" },
+  { href: "/about", label: "Meet the Team", icon: Users, testid: "link-about" },
   { href: "/settings", label: "Settings", icon: SettingsIcon, testid: "nav-settings" },
 ];
 
@@ -82,6 +85,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="flex items-center gap-3 px-5 py-5 border-b border-gold/10">
         <ScopeLogo size={40} />
         <Wordmark />
+        <HostAvatars size={40} className="ml-auto" />
       </div>
       <div className="py-4 flex-1 flex flex-col">
         <NavItems onNavigate={() => setMobileOpen(false)} />
@@ -110,6 +114,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </Button>
         <ScopeLogo size={28} />
         <Wordmark showSubtitle={false} />
+        <HostAvatars size={32} className="ml-auto" />
       </div>
 
       {/* Mobile drawer */}
