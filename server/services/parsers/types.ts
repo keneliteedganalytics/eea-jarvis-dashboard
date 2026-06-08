@@ -37,6 +37,12 @@ export interface BrisnetHorse {
   pace: BrisnetPace;
   sire?: { name?: string; winPctOverall?: number | null } | null;
   dam?: { name?: string } | null;
+  // Dam's sire (broodmare sire). Surfaced for the Phase 2 bloodstock factor;
+  // joined in from the DRM .DR2 pedigree fields when available.
+  damSire?: { name?: string } | null;
+  // Lifetime starts, used to detect first-time / lightly-raced starters where
+  // pedigree carries more weight. Null when the PP doesn't expose it.
+  lifetimeStarts?: number | null;
   trainerAngles?: string[];
   quickPlayComment?: string | null;
 }

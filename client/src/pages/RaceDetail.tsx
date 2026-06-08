@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { CardWithRaces, RaceWithResult } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { TierPill } from "@/components/brand/TierPill";
+import { PedigreeChip } from "@/components/PedigreeChip";
 import { ScopeLogo } from "@/components/brand/ScopeLogo";
 import { useJarvis } from "@/lib/jarvis";
 import { tierOf } from "@/lib/tiers";
@@ -97,6 +98,11 @@ function PickEditor({ race }: { race: RaceWithResult }) {
           <div className="mt-1 flex items-baseline gap-2">
             <span className="text-gold-light font-display font-black text-lg tabular-nums">#{p.pgm}</span>
             <span className="text-silver text-sm truncate">{p.name}</span>
+            {p.pgm && (
+              <span className="self-center">
+                <PedigreeChip pedigree={race.pedigree?.[p.pgm]} />
+              </span>
+            )}
             <span className="ml-auto text-gold font-display font-bold tabular-nums">{p.score?.toFixed(1)}</span>
           </div>
         </div>

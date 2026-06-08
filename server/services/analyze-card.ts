@@ -30,6 +30,7 @@ import {
 } from "./parsers/post-time";
 import type { InsertRace, RaceWeather } from "@shared/schema";
 import { getRaceWeather } from "./weather";
+import { getBloodstockForCard } from "./brisnet-ingest";
 
 export interface AnalyzeInput {
   track: string;
@@ -142,6 +143,22 @@ export async function analyzeCard(
   // Index Equibase races by number for pairing with Brisnet.
   const equiByNum = new Map<number, EquibaseRace>();
   for (const r of equi.races) equiByNum.set(r.raceNumber, r);
+
+  // Join Brisnet DRM pedigree (sire/dam/dam-sire) onto the parsed Brisnet horses
+  // so the Phase 2 bloodstock factor has names to score. Keyed by (race#, pgm);
+  // a missing DRM card just leaves pedigree null and the factor stays inert.
+  const pedigreeByKey = getBloodstockForCard(input.date, input.track);
+  if (pedigreeByKey.size > 0) {
+    for (const br of bris.races) {
+      for (const h of br.horses) {
+        const ped = pedigreeByKey.get(`${br.raceNumber}|${h.pgm}`);
+        if (!ped) continue;
+        if (ped.sireName) h.sire = { ...(h.sire ?? {}), name: ped.sireName };
+        if (ped.damName) h.dam = { ...(h.dam ?? {}), name: ped.damName };
+        if (ped.damSireName) h.damSire = { name: ped.damSireName };
+      }
+    }
+  }
 
   onProgress("Fetching prior-day track bias");
   const biasCard = await getOrFetchBias(input.track, input.date).catch(() => null);
@@ -341,6 +358,7 @@ export async function analyzeCard(
         personaVersion: activeVersion?.id ?? null,
         figureWeightsJson: JSON.stringify(weights),
         biasContextJson: biasCard ? JSON.stringify(biasCard) : null,
+        bloodstockJson: JSON.stringify(h.bloodstockAdjustment),
         llmProvider: provider,
         llmModel: model || null,
         createdAt: now,

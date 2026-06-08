@@ -198,6 +198,9 @@ export const predictions = sqliteTable("predictions", {
   personaVersion: integer("persona_version"),
   figureWeightsJson: text("figure_weights_json"),
   biasContextJson: text("bias_context_json"),
+  // PR #16 Phase 2: per-horse bloodstock adjustment (applied/composite/
+  // confidence/reasonCodes/ratingDelta) as JSON, parallel to the weather factor.
+  bloodstockJson: text("bloodstock_json"),
   llmProvider: text("llm_provider", { enum: ["anthropic", "poe"] }),
   llmModel: text("llm_model"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
@@ -391,10 +394,30 @@ export interface RaceWeather {
 
 export type RaceWeatherRow = typeof raceWeather.$inferSelect;
 
+// ── Bloodstock (PR #16 Phase 2) ──────────────────────────────────────────────
+export type BloodstockConfidence = "high" | "medium" | "low" | "none";
+
+// Compact per-horse pedigree summary the race-card chip renders. Mirrors the
+// fusion engine's BloodstockAdjustment but trimmed to what the UI shows.
+export interface PedigreeSummary {
+  composite: number;
+  confidence: BloodstockConfidence;
+  applied: boolean;
+  reasonCodes: string[];
+  sireName?: string | null;
+  damName?: string | null;
+  damSireName?: string | null;
+  surfaceFit?: number | null;
+  distanceFit?: number | null;
+  wetFit?: number | null;
+}
+
 export type RaceWithResult = Race & {
   result?: Result | null;
   bets?: RaceWagers;
   weather?: RaceWeather | null;
+  // Pedigree summary per program number, for the race-card chip. Keyed by pgm.
+  pedigree?: Record<string, PedigreeSummary>;
 };
 export type CardWithRaces = Card & { races: RaceWithResult[] };
 

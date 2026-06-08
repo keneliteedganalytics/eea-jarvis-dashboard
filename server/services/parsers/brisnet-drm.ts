@@ -19,6 +19,10 @@ export const DR2 = {
   raceDate: 2, // "20260608"
   raceNumber: 3, // 1
   postPosition: 4, // program/post number for win betting on these cards
+  horseName: 31, // runner name, e.g. "VENEZUELAN HUG"
+  sireName: 32, // sire, e.g. "CONSTITUTION"
+  damName: 33, // dam, e.g. "SILVER PALACE"
+  damSireName: 34, // dam's sire (broodmare sire), e.g. "PALACE MALICE"
   runStyle: 189, // "E" | "P" | "E/P" | "S" | "NA"  (BRIS Race Shape / run style)
   speedParEarly: 193, // race-level BRIS early-speed par (constant per race)
   speedParLate: 194, // race-level BRIS late-speed par
@@ -33,15 +37,35 @@ export const DR2 = {
   companyLine: 233, // BRIS company-line code (encoded token)
 } as const;
 
+// The 24-integer pedigree-stat block (1-indexed fields 165..188) carried on
+// every DR2 row. Empirically confirmed against the FL 2026-06-08 fixture as a
+// contiguous numeric run, but the per-column semantics (which slot is mud vs
+// turf vs sprint, count vs win%) are NOT reliably documented for the multi-file
+// DR2 layout — the published BRIS field guide covers the *single*-file format,
+// whose offsets differ. We therefore PRESERVE the block verbatim (so it can be
+// re-decoded later without a re-download) and do NOT invent a column mapping
+// that could silently bias ratings on misread data. The bloodstock scorer keys
+// off the reliably-anchored sire/dam/damsire NAMES instead. See server/
+// bloodstock.ts for the rationale and the curated sire-aptitude reference.
+export const DR2_PEDIGREE_STAT_FIRST = 165;
+export const DR2_PEDIGREE_STAT_LAST = 188;
+
 export interface DrmHorse {
   programNumber: string; // post position used as program number
   postPosition: number | null;
+  horseName: string | null;
   runStyle: string | null;
   primePower: number | null;
   bestSpeed: number | null;
   bestSpeedBySurface: { a: number | null; b: number | null };
   mlOdds: number | null;
   companyLine: string | null;
+  // Bloodstock (Phase 2). Names are reliably anchored; the raw stat block is
+  // preserved untyped for future re-decode (see DR2_PEDIGREE_STAT_FIRST note).
+  sireName: string | null;
+  damName: string | null;
+  damSireName: string | null;
+  pedigreeStats: number[]; // fields 165..188 as numbers (null slots → 0)
   rawRow: string[]; // full DR2 row, preserved for later re-parse
 }
 
@@ -107,6 +131,13 @@ function num(s: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// Trim + collapse whitespace on a pedigree/horse name; "" → null. The DRM file
+// stores names upper-cased with trailing padding ("CONSTITUTION ").
+export function normalizeName(s: string): string | null {
+  const t = s.trim().replace(/\s+/g, " ");
+  return t.length ? t : null;
+}
+
 // "20260608" -> "2026-06-08". Returns "" if not 8 digits.
 export function drDateToIso(yyyymmdd: string): string {
   const m = /^(\d{4})(\d{2})(\d{2})$/.exec(yyyymmdd.trim());
@@ -145,9 +176,14 @@ export function parseDr2(text: string, fallbackTrack: string): DrmCard {
     }
 
     const postPosition = num(at(row, DR2.postPosition));
+    const pedigreeStats: number[] = [];
+    for (let f = DR2_PEDIGREE_STAT_FIRST; f <= DR2_PEDIGREE_STAT_LAST; f++) {
+      pedigreeStats.push(num(at(row, f)) ?? 0);
+    }
     race.horses.push({
       programNumber: at(row, DR2.postPosition) || String(race.horses.length + 1),
       postPosition,
+      horseName: normalizeName(at(row, DR2.horseName)),
       runStyle: at(row, DR2.runStyle) || null,
       primePower: num(at(row, DR2.primePower)),
       bestSpeed: num(at(row, DR2.bestSpeed)),
@@ -157,6 +193,10 @@ export function parseDr2(text: string, fallbackTrack: string): DrmCard {
       },
       mlOdds: num(at(row, DR2.mlOdds)),
       companyLine: at(row, DR2.companyLine) || null,
+      sireName: normalizeName(at(row, DR2.sireName)),
+      damName: normalizeName(at(row, DR2.damName)),
+      damSireName: normalizeName(at(row, DR2.damSireName)),
+      pedigreeStats,
       rawRow: row,
     });
   }

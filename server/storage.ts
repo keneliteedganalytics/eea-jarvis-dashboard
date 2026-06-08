@@ -51,11 +51,13 @@ import type {
   CardShow,
   ShowManifest,
 } from "@shared/schema";
+import type { PedigreeSummary } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { gradeRace, gradeFlags } from "./grading";
 import { DEFAULT_WEIGHTS, PERSONA_V1 } from "./services/eea-config";
 import { buildWagers } from "./services/wagers";
+import { getBloodstockForCard } from "./services/brisnet-ingest";
 
 export interface IStorage {
   // Cards
@@ -193,13 +195,56 @@ export class DatabaseStorage implements IStorage {
     // (Race Detail, Print) renders identical numbers off the same race rows.
     const s = this.getSettings();
     const racesOnCard = raceRows.length;
+    // DRM pedigree names for this card (race#|pgm → sire/dam/dam-sire), used to
+    // enrich the bloodstock chip's tooltip. Empty when the card was never
+    // DRM-ingested, in which case the chip falls back to confidence "none".
+    const pedigreeNames = getBloodstockForCard(card.date, card.track);
     const withResults: RaceWithResult[] = raceRows.map((r) => ({
       ...r,
       result: this.getResultByRace(r.id) ?? null,
       bets: buildWagers(r, { bankroll: s.bankroll, dailyRiskCapPct: s.dailyRiskCapPct }, racesOnCard),
       weather: this.getRaceWeather(r.id),
+      pedigree: this.buildPedigree(r.id, r.raceNumber, pedigreeNames),
     }));
     return { ...card, races: withResults };
+  }
+
+  // Build the per-program pedigree summaries the bloodstock chip renders, keyed
+  // by program number. Reads each prediction's bloodstockJson (the fusion
+  // engine's BloodstockAdjustment) and enriches it with sire/dam/dam-sire names
+  // from the DRM ingest. Races with no predictions or no bloodstockJson simply
+  // omit those horses; a missing DRM card leaves names null.
+  private buildPedigree(
+    raceId: number,
+    raceNumber: number,
+    pedigreeNames: ReturnType<typeof getBloodstockForCard>,
+  ): Record<string, PedigreeSummary> {
+    const out: Record<string, PedigreeSummary> = {};
+    for (const p of this.getPredictionsByRace(raceId)) {
+      if (!p.bloodstockJson) continue;
+      let adj: {
+        applied?: boolean;
+        composite?: number;
+        confidence?: PedigreeSummary["confidence"];
+        reasonCodes?: string[];
+      };
+      try {
+        adj = JSON.parse(p.bloodstockJson);
+      } catch {
+        continue;
+      }
+      const names = pedigreeNames.get(`${raceNumber}|${p.horsePgm}`);
+      out[p.horsePgm] = {
+        composite: adj.composite ?? 50,
+        confidence: adj.confidence ?? "none",
+        applied: adj.applied ?? false,
+        reasonCodes: adj.reasonCodes ?? [],
+        sireName: names?.sireName ?? null,
+        damName: names?.damName ?? null,
+        damSireName: names?.damSireName ?? null,
+      };
+    }
+    return out;
   }
 
   getLatestCard(): CardWithRaces | undefined {
