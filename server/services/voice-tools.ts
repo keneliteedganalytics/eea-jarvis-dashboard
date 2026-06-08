@@ -24,7 +24,12 @@ import {
 import { getOrFetchBias } from "./bias-fetcher";
 import { fetchOtbFingerLakes } from "./otb-finger-lakes";
 import { runOnDemandIngest } from "./on-demand-ingest";
-import type { CardWithRaces, RaceWithResult } from "@shared/schema";
+import {
+  runDeepPostmortem,
+  runDeepPostmortemToday,
+  getDeepPostmortem,
+} from "./deep-postmortem";
+import type { CardWithRaces, RaceWithResult, DeepPostmortem } from "@shared/schema";
 import type { RaceConditions } from "./parsers/types";
 
 const TIERS = ["SNIPER", "EDGE", "DUAL", "RECON", "PASS"] as const;
@@ -287,6 +292,40 @@ export const VOICE_TOOLS: Anthropic.Tool[] = [
       type: "object",
       properties: {
         cardId: { type: "integer", description: "Card id to lock/publish." },
+      },
+      required: ["cardId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "run_deep_postmortem",
+    description:
+      "Run the rigorous deep post-mortem ('answer key') analysis comparing what we knew pre-race " +
+      "against what actually happened — where we underweighted a visible signal, where we overrated " +
+      "our top pick. Use when the user says 'run a postmortem', 'do the deep dive on today', " +
+      "'grade the day', 'where could we have been better'. Defaults to today's graded cards.",
+    input_schema: {
+      type: "object",
+      properties: {
+        scope: {
+          type: "string",
+          enum: ["today", "card"],
+          description: "'today' runs every graded card from today; 'card' runs one card. Defaults to today.",
+        },
+        cardId: { type: "integer", description: "Card id. Required when scope is 'card'." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_deep_postmortem",
+    description:
+      "Return the latest saved deep post-mortem for a card (run_deep_postmortem must have been run " +
+      "first). Use for 'what did the deep dive say', 'pull up the postmortem for card N'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        cardId: { type: "integer", description: "Card id to fetch the saved deep post-mortem for." },
       },
       required: ["cardId"],
       additionalProperties: false,
@@ -721,6 +760,72 @@ export function getPostmortems(input: { cardId?: number }, ctx: ToolContext): To
   }
 }
 
+// Compact a full DeepPostmortem into a short spoken-friendly payload. Scarlett
+// reads the day line + top lesson and points the user to the Postmortem page;
+// the heavy per-race breakdown lives on the page, not in a spoken reply.
+function summarizeDeepPostmortem(p: DeepPostmortem): ToolResult {
+  return {
+    cardId: p.cardId,
+    track: p.track,
+    date: p.date,
+    summary: p.summary,
+    topLesson: p.lessons[0] ?? null,
+    systemicFlags: p.systemicFlags,
+    note: "Open the Postmortem page for the full breakdown.",
+  };
+}
+
+// Run the deep post-mortem. scope 'card' runs one card; 'today' (default) runs
+// every graded card from today. Informational — never pushes to ctx.actions, so
+// the reply stays on the Scarlett voice.
+export async function runDeepPostmortemTool(
+  input: { scope?: "today" | "card"; cardId?: number },
+  ctx: ToolContext,
+): Promise<ToolResult> {
+  try {
+    const scope = input.scope ?? "today";
+    if (scope === "card") {
+      const cardId = input.cardId ?? ctx.card?.id;
+      if (cardId == null) return { error: "Which card should I run the deep post-mortem on?" };
+      const report = await runDeepPostmortem(cardId);
+      return summarizeDeepPostmortem(report);
+    }
+    const reports = await runDeepPostmortemToday();
+    if (reports.length === 0) {
+      return { scope: "today", count: 0, note: "No graded cards from today to analyze yet." };
+    }
+    return {
+      scope: "today",
+      count: reports.length,
+      cards: reports.map(summarizeDeepPostmortem),
+      note: "Open the Postmortem page for the full breakdown.",
+    };
+  } catch (e) {
+    return { error: `Deep post-mortem failed: ${(e as Error).message}` };
+  }
+}
+
+// Return the latest saved deep post-mortem for a card. Informational.
+export function getDeepPostmortemTool(
+  input: { cardId?: number },
+  ctx: ToolContext,
+): ToolResult {
+  try {
+    const cardId = input.cardId ?? ctx.card?.id;
+    if (cardId == null) return { error: "Which card's deep post-mortem do you want?" };
+    const report = getDeepPostmortem(cardId);
+    if (!report) {
+      return {
+        cardId,
+        note: "No deep post-mortem saved for that card yet — run one first.",
+      };
+    }
+    return summarizeDeepPostmortem(report);
+  } catch (e) {
+    return { error: `Failed to fetch deep post-mortem: ${(e as Error).message}` };
+  }
+}
+
 export async function getBiasToday(
   input: { track?: string; date?: string },
   ctx: ToolContext,
@@ -880,6 +985,13 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
       );
     case "lock_card":
       return lockCard(i as { cardId?: number }, ctx);
+    case "run_deep_postmortem":
+      return runDeepPostmortemTool(
+        i as { scope?: "today" | "card"; cardId?: number },
+        ctx,
+      );
+    case "get_deep_postmortem":
+      return getDeepPostmortemTool(i as { cardId?: number }, ctx);
     default:
       return { error: `Unknown tool: ${name}` };
   }

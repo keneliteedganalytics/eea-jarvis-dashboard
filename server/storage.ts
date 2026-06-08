@@ -16,6 +16,7 @@ import {
   predictionHistory,
   cardShows,
   raceWeather,
+  deepPostmortems,
 } from "@shared/schema";
 import type {
   Card,
@@ -50,6 +51,8 @@ import type {
   PredictionHistory,
   CardShow,
   ShowManifest,
+  DeepPostmortemRow,
+  DeepPostmortem,
 } from "@shared/schema";
 import type { PedigreeSummary } from "@shared/schema";
 import { db } from "./db";
@@ -157,6 +160,10 @@ export interface IStorage {
     voiceConversationId?: number,
   ): PredictionHistory;
   getLatestSnapshot(raceId: number): PredictionHistory | undefined;
+
+  // ── Deep post-mortem (PR #25) ──────────────────────────────────────────────
+  upsertDeepPostmortem(cardId: number, payload: DeepPostmortem): DeepPostmortemRow;
+  getDeepPostmortem(cardId: number): DeepPostmortem | null;
 }
 
 // Map a persisted race_weather row to the RaceWeather API/engine shape.
@@ -814,6 +821,36 @@ export class DatabaseStorage implements IStorage {
       .where(eq(predictionHistory.raceId, raceId))
       .orderBy(desc(predictionHistory.id))
       .all()[0];
+  }
+
+  // ── Deep post-mortem (PR #25) ──────────────────────────────────────────────
+  // Idempotent: delete-then-insert so re-running the analyzer for a card
+  // replaces the prior report rather than stacking rows.
+  upsertDeepPostmortem(cardId: number, payload: DeepPostmortem): DeepPostmortemRow {
+    db.delete(deepPostmortems).where(eq(deepPostmortems.cardId, cardId)).run();
+    return db
+      .insert(deepPostmortems)
+      .values({
+        cardId,
+        generatedAt: payload.generatedAt,
+        payload: JSON.stringify(payload),
+      })
+      .returning()
+      .get();
+  }
+
+  getDeepPostmortem(cardId: number): DeepPostmortem | null {
+    const row = db
+      .select()
+      .from(deepPostmortems)
+      .where(eq(deepPostmortems.cardId, cardId))
+      .get();
+    if (!row) return null;
+    try {
+      return JSON.parse(row.payload) as DeepPostmortem;
+    } catch {
+      return null;
+    }
   }
 }
 

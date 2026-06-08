@@ -317,6 +317,19 @@ export const predictionHistory = sqliteTable("prediction_history", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
+// ── Deep post-mortem (PR #25) ─────────────────────────────────────────────
+// One row per card holding the full DeepPostmortem payload as JSON. Idempotent:
+// re-running the analyzer for a card overwrites its row (card_id is unique).
+export const deepPostmortems = sqliteTable("deep_postmortems", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  cardId: integer("card_id")
+    .notNull()
+    .references(() => cards.id, { onDelete: "cascade" })
+    .unique(),
+  generatedAt: text("generated_at").notNull(),
+  payload: text("payload").notNull(), // JSON of DeepPostmortem
+});
+
 // ── Insert schemas ────────────────────────────────────────────────────────
 export const insertCardSchema = createInsertSchema(cards).omit({
   id: true,
@@ -476,6 +489,58 @@ export type InsertRaceSummary = z.infer<typeof insertRaceSummarySchema>;
 // ── Voice types ───────────────────────────────────────────────────────────
 export type VoiceConversation = typeof voiceConversations.$inferSelect;
 export type PredictionHistory = typeof predictionHistory.$inferSelect;
+
+// ── Deep post-mortem types (PR #25) ───────────────────────────────────────
+export type DeepPostmortemRow = typeof deepPostmortems.$inferSelect;
+
+// A visible pre-race signal that favored the actual winner. wouldHaveFlipped is
+// true when acting on it would have changed our top pick.
+export interface VisibleSignal {
+  signal: string;
+  detail: string;
+  wouldHaveFlipped: boolean;
+}
+
+export interface DeepRacePostmortem {
+  raceNumber: number;
+  ourTopPick: { runner: string; tier: string; rating: number };
+  actualWinner: { runner: string; programNumber: number; odds?: number };
+  outcome: "hit" | "place" | "show" | "itm" | "miss";
+  hindsightAnalysis: {
+    winnerWasInPool: boolean;
+    winnerTier: string | null;
+    winnerRating: number | null;
+    visibleSignals: VisibleSignal[];
+    overweightedFactors: string[];
+  };
+  paceShape: string;
+  biasAlignment: string;
+  weatherAlignment: string;
+  scratches: {
+    preLocked: string[];
+    postLocked: string[];
+    impactedTopPick: boolean;
+  };
+}
+
+export interface DeepPostmortem {
+  cardId: number;
+  track: string;
+  date: string;
+  generatedAt: string;
+  summary: {
+    raceCount: number;
+    graded: number;
+    winRate: number;
+    itmRate: number;
+    roi: number;
+    bestCall: { raceNumber: number; tier: string; runner: string; reason: string };
+    worstMiss: { raceNumber: number; ourPick: string; actualWinner: string; visibleSignal: string };
+  };
+  races: DeepRacePostmortem[];
+  lessons: string[];
+  systemicFlags: string[];
+}
 
 // A single proposed (and later applied) tier/pick change for one race.
 export const tierChangeSchema = z.object({
