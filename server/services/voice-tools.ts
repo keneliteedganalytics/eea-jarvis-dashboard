@@ -23,6 +23,7 @@ import {
 } from "../analytics";
 import { getOrFetchBias } from "./bias-fetcher";
 import { fetchOtbFingerLakes } from "./otb-finger-lakes";
+import { runOnDemandIngest } from "./on-demand-ingest";
 import type { CardWithRaces, RaceWithResult } from "@shared/schema";
 import type { RaceConditions } from "./parsers/types";
 
@@ -46,6 +47,10 @@ export interface ToolContext {
   activeRaceNumber?: number;
   // Collected side effect: every propose_tier_change call appends here.
   proposals: ProposedTierChange[];
+  // Action tools (ingest_card_for_review, lock_card) append their tool name
+  // here so the router can route the reply to the Jarvis voice — same intent as
+  // proposals[], but these actions take effect immediately (no confirm step).
+  actions?: string[];
 }
 
 type ToolResult = Record<string, unknown> | { error: string };
@@ -251,6 +256,41 @@ export const VOICE_TOOLS: Anthropic.Tool[] = [
       "results — a fallback source independent of our native feed. Use for 'what's OTB saying " +
       "about Finger Lakes', 'any late scratches at Finger Lakes'.",
     input_schema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "ingest_card_for_review",
+    description:
+      "Pull race data from Equibase and Brisnet for a specific track and date, run handicapping, " +
+      "and return a draft card ready for the user to review and lock. Use when the user asks to " +
+      "'pull', 'fetch', 'get', 'ingest', or 'load' a card for a specific track and date.",
+    input_schema: {
+      type: "object",
+      properties: {
+        track: { type: "string", description: "Track name, e.g. 'Finger Lakes', 'Saratoga'." },
+        date: { type: "string", description: "Date in YYYY-MM-DD format. Resolve 'tomorrow'/'Friday' yourself." },
+        source: {
+          type: "string",
+          enum: ["both", "equibase", "brisnet"],
+          description: "Which sources to pull. Defaults to both.",
+        },
+      },
+      required: ["track", "date"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "lock_card",
+    description:
+      "Lock and publish a draft card so it becomes active for grading and the poller. Use when the " +
+      "user says 'lock card N', 'publish card N', or 'make card N live'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        cardId: { type: "integer", description: "Card id to lock/publish." },
+      },
+      required: ["cardId"],
+      additionalProperties: false,
+    },
   },
 ];
 
@@ -724,6 +764,75 @@ export async function getOtbFingerLakesStatus(_input: unknown, _ctx: ToolContext
   }
 }
 
+// ── Action tools (ingest + lock) ─────────────────────────────────────────────
+// Both record their name in ctx.actions so the router replies in the Jarvis
+// voice (same intent as propose_tier_change, but these take effect immediately).
+
+export async function ingestCardForReview(
+  input: { track?: string; date?: string; source?: "both" | "equibase" | "brisnet" },
+  ctx: ToolContext,
+): Promise<ToolResult> {
+  ctx.actions?.push("ingest_card_for_review");
+  try {
+    if (!input.track || !input.date) {
+      return { error: "I need both a track and a date (YYYY-MM-DD) to pull a card." };
+    }
+    const result = await runOnDemandIngest({
+      track: input.track,
+      date: input.date,
+      source: input.source ?? "both",
+    });
+    if (result.status === "failed") {
+      return { error: result.warnings[0] ?? `Could not pull ${input.track} for ${input.date}.` };
+    }
+    const races = result.raceCount ?? 0;
+    const conv = result.conviction ?? "unrated";
+    if (result.warnings.includes("existing card returned, ingest skipped")) {
+      return {
+        summary:
+          `${result.track} for ${result.date} is already on the board as card #${result.cardId} ` +
+          `(${races} races, conviction ${conv}). Say 'lock card ${result.cardId}' to publish it.`,
+        cardId: result.cardId,
+        status: result.status,
+      };
+    }
+    const partialNote =
+      result.status === "partial"
+        ? ` Brisnet was unavailable, so this is an Equibase-only draft.`
+        : "";
+    return {
+      summary:
+        `Pulled ${result.track} for ${result.date}: ${races} races, conviction ${conv}. ` +
+        `Card #${result.cardId} is in draft — say 'lock card ${result.cardId}' to publish.${partialNote}`,
+      cardId: result.cardId,
+      status: result.status,
+      raceCount: races,
+      conviction: conv,
+    };
+  } catch (e) {
+    return { error: `Ingest failed: ${(e as Error).message}` };
+  }
+}
+
+export function lockCard(input: { cardId?: number }, ctx: ToolContext): ToolResult {
+  ctx.actions?.push("lock_card");
+  try {
+    if (typeof input.cardId !== "number") {
+      return { error: "Which card? Give me a card number to lock." };
+    }
+    const updated = storage.updateCard(input.cardId, { locked: true });
+    if (!updated) return { error: `Card #${input.cardId} not found.` };
+    return {
+      ok: true,
+      cardId: updated.id,
+      locked: updated.locked,
+      summary: `Card #${updated.id} (${updated.track} ${updated.date}) is locked and live.`,
+    };
+  } catch (e) {
+    return { error: `Lock failed: ${(e as Error).message}` };
+  }
+}
+
 // Dispatch a tool_use block to its handler. Unknown tools resolve to an error
 // result rather than throwing so the loop can continue.
 export async function runTool(name: string, input: unknown, ctx: ToolContext): Promise<ToolResult> {
@@ -764,6 +873,13 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
       return getBiasToday(i as { track?: string; date?: string }, ctx);
     case "get_otb_finger_lakes_status":
       return getOtbFingerLakesStatus(i, ctx);
+    case "ingest_card_for_review":
+      return ingestCardForReview(
+        i as { track?: string; date?: string; source?: "both" | "equibase" | "brisnet" },
+        ctx,
+      );
+    case "lock_card":
+      return lockCard(i as { cardId?: number }, ctx);
     default:
       return { error: `Unknown tool: ${name}` };
   }
