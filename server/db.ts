@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS races (
   show_pgm TEXT, show_name TEXT, show_score REAL,
   fourth_pgm TEXT, fourth_name TEXT, fourth_score REAL,
   why_text TEXT,
-  pace_text TEXT
+  pace_text TEXT,
+  tier_demoted_by TEXT
 );
 
 CREATE TABLE IF NOT EXISTS results (
@@ -239,6 +240,18 @@ const addCardCol = (name: string, ddl: string) => {
 };
 addCardCol("status", "status TEXT NOT NULL DEFAULT 'active'");
 addCardCol("archived_at", "archived_at TEXT");
+
+// Idempotent races-column migration for the postmortem flag-driven tier
+// demotion (Card 1 Saratoga 2026-06-07 postmortem). Nullable; only set when a
+// flag on the win/place pick drops the tier.
+const racesCols = new Set(
+  (sqlite.prepare("PRAGMA table_info(races)").all() as { name: string }[]).map(
+    (c) => c.name,
+  ),
+);
+if (!racesCols.has("tier_demoted_by")) {
+  sqlite.exec("ALTER TABLE races ADD COLUMN tier_demoted_by TEXT");
+}
 
 export const db = drizzle(sqlite);
 export { sqlite };

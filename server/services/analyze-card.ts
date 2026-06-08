@@ -16,6 +16,7 @@ import {
   deriveFlags,
   computeCardConviction,
 } from "./card-finishing";
+import { applyPostmortemAdjustments } from "./postmortem-adjustments";
 import { getOrFetchBias, toBiasContext } from "./bias-fetcher";
 import { enrichMaiden, type EnrichmentResult } from "./maiden-enrichment";
 import { handicapRace, type HandoffConfig, type Handicap } from "./llm-handoff";
@@ -199,17 +200,25 @@ export async function analyzeCard(
     // Persist the race-level pick + tier.
     const flags = deriveFlags(fused, weights);
     if (handicap) {
-      const picks = picksFromHandicap(handicap);
+      const rawPicks = picksFromHandicap(handicap);
+      // Postmortem fixes (Card 1 Saratoga 2026-06-07): tighten EDGE class flips,
+      // demote tier on flags hitting the win/place pick, co-top live longshots.
+      const adj = applyPostmortemAdjustments(fused, handicap.tier as Tier, rawPicks, flags);
+      const picks = adj.picks;
       const scores = scoresForPicks(fused, picks);
+      const read = adj.coTopNote
+        ? `${handicap.executiveSummary} — ${adj.coTopNote}`
+        : handicap.executiveSummary;
       // Update the race row directly via storage (tier + picks + scores + read).
       storage.updateRaceFusion(raceId, {
-        tier: handicap.tier,
-        read: handicap.executiveSummary,
+        tier: adj.tier,
+        read,
         flags: JSON.stringify(flags),
+        tierDemotedBy: adj.tierDemotedBy,
         ...picks,
         ...scores,
       });
-      finalTiers.push(handicap.tier as Tier);
+      finalTiers.push(adj.tier);
       analyzed++;
     } else {
       // No LLM: fall back to the deterministic tier + fused ranking so the card
@@ -223,14 +232,16 @@ export async function analyzeCard(
         fourthPgm: ranked[3]?.pgm ?? null, fourthName: ranked[3]?.name ?? null,
       };
       const leaderTier = (tierAssign.find((t) => t.pgm === ranked[0]?.pgm)?.tier ?? "PASS") as Tier;
+      const adj = applyPostmortemAdjustments(fused, leaderTier, picks, flags);
       storage.updateRaceFusion(raceId, {
-        tier: leaderTier,
+        tier: adj.tier,
         read: "LLM unavailable — review manually.",
         flags: JSON.stringify(flags),
-        ...picks,
-        ...scoresForPicks(fused, picks),
+        tierDemotedBy: adj.tierDemotedBy,
+        ...adj.picks,
+        ...scoresForPicks(fused, adj.picks),
       });
-      finalTiers.push(leaderTier);
+      finalTiers.push(adj.tier);
     }
 
     // Persist per-horse predictions (fused figures + LLM reasoning where ranked).
