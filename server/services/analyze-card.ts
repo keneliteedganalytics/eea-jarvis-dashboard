@@ -22,6 +22,12 @@ import { enrichMaiden, type EnrichmentResult } from "./maiden-enrichment";
 import { handicapRace, type HandoffConfig, type Handicap } from "./llm-handoff";
 import { DEFAULT_WEIGHTS, type EeaWeights } from "./eea-config";
 import type { BrisnetRace, EquibaseRace } from "./parsers/types";
+import {
+  extractEquibasePostTime,
+  extractBrisnetDrfPostTime,
+  fallbackPostTime,
+  type PostTime,
+} from "./parsers/post-time";
 import type { InsertRace } from "@shared/schema";
 
 export interface AnalyzeInput {
@@ -78,6 +84,43 @@ function picksFromHandicap(h: Handicap) {
   };
 }
 
+// Resolve every race's post time, never returning NULL. Equibase's "Post Time:"
+// line is the in-path primary source; the Brisnet local token is a secondary;
+// missing races fall back to previous-race + delta (with a structured warning).
+function resolvePostTimes(
+  fusedRaces: { raceNumber: number }[],
+  equiByNum: Map<number, EquibaseRace>,
+  brisRaces: BrisnetRace[],
+  input: { track: string; date: string },
+): Map<number, PostTime> {
+  const brisByNum = new Map<number, BrisnetRace>();
+  for (const r of brisRaces) brisByNum.set(r.raceNumber, r);
+
+  const ordered = [...fusedRaces].sort((a, b) => a.raceNumber - b.raceNumber);
+  const out = new Map<number, PostTime>();
+  let prev: PostTime | null = null;
+
+  for (const f of ordered) {
+    const eq = equiByNum.get(f.raceNumber);
+    const br = brisByNum.get(f.raceNumber);
+    let pt: PostTime | null = null;
+
+    if (eq?.postTimeRaw) {
+      pt = extractEquibasePostTime(eq.postTimeRaw, input.date, input.track);
+    }
+    if (!pt && br?.postTimeRaw) {
+      pt = extractBrisnetDrfPostTime(br.postTimeRaw, input.date, input.track);
+    }
+    if (!pt) {
+      pt = fallbackPostTime(prev, input.date, input.track, f.raceNumber);
+    }
+
+    out.set(f.raceNumber, pt);
+    prev = pt;
+  }
+  return out;
+}
+
 export async function analyzeCard(
   input: AnalyzeInput,
   onProgress: AnalyzeProgress = () => {},
@@ -116,10 +159,17 @@ export async function analyzeCard(
     fuseRace(br, equiByNum.get(br.raceNumber), weights, biasCtx),
   );
 
+  // Resolve a post time for every race in race-number order so the fallback can
+  // chain off the previous race. Source priority: Equibase "Post Time:" line →
+  // Brisnet local post token → previous-race + delta (logged). Never NULL.
+  const postByNum = resolvePostTimes(fusedRaces, equiByNum, bris.races, input);
+
   // Create the card with placeholder race rows (tier filled after LLM).
   const raceRowSeeds: Omit<InsertRace, "cardId">[] = fusedRaces.map((f) => ({
     raceNumber: f.raceNumber,
     tier: "PASS",
+    post: postByNum.get(f.raceNumber)?.display ?? null,
+    postTimeUtc: postByNum.get(f.raceNumber)?.utcIso ?? null,
     conditions: cleanConditions(f.conditions.raw, {
       surface: f.conditions.surface,
       distance: f.conditions.distance,

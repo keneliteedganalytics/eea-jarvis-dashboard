@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS races (
   race_number INTEGER NOT NULL,
   tier TEXT NOT NULL,
   post TEXT,
+  post_time_utc TEXT,
   conditions TEXT,
   shape TEXT,
   read TEXT,
@@ -307,6 +308,11 @@ const racesCols = new Set(
 );
 if (!racesCols.has("tier_demoted_by")) {
   sqlite.exec("ALTER TABLE races ADD COLUMN tier_demoted_by TEXT");
+}
+// Idempotent races-column migration for PR #17: separate UTC post time for
+// sorting/comparison. races.post stays the track-local display string.
+if (!racesCols.has("post_time_utc")) {
+  sqlite.exec("ALTER TABLE races ADD COLUMN post_time_utc TEXT");
 }
 
 export const db = drizzle(sqlite);
