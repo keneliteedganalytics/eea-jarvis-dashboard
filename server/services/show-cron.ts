@@ -13,6 +13,7 @@ export function cardNeedsShow(card: Card, show: CardShow | undefined): boolean {
   if (!show) return true;
   if (show.status === "error") return true;
   if (show.status === "queued") return true;
+  if (show.status === "requested") return false; // Computer should pick this up next
   if (show.status === "building") return false; // a build is already in flight
   if (show.status === "ready") {
     if (!show.manifestJson) return true;
