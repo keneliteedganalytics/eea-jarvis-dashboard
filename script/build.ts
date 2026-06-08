@@ -1,6 +1,6 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile } from "node:fs/promises";
+import { rm, readFile, mkdir, cp } from "node:fs/promises";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -57,6 +57,12 @@ async function buildAll() {
     external: externals,
     logLevel: "info",
   });
+
+  // Daily Show keyframes are read at runtime but the runtime image omits the
+  // server/ tree, so copy them into dist/ where show-keyframes.ts can find them.
+  console.log("copying show keyframes...");
+  await mkdir("dist/show-keyframes", { recursive: true });
+  await cp("server/assets/show-keyframes", "dist/show-keyframes", { recursive: true });
 }
 
 buildAll().catch((err) => {

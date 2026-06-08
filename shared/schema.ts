@@ -112,6 +112,18 @@ export const settings = sqliteTable("settings", {
   tierShareRecon: real("tier_share_recon").notNull().default(0.08),
 });
 
+// ── Trackside Daily Show (broadcast video build per card) ─────────────────
+// One row per card. status drives the player's polling UI; manifestJson holds
+// the built segment list once ready. Backward-compatible add — created lazily.
+export const cardShows = sqliteTable("card_shows", {
+  cardId: integer("card_id").primaryKey(),
+  status: text("status").notNull().default("queued"), // queued|building|ready|error
+  manifestJson: text("manifest_json"),
+  error: text("error"),
+  startedAt: text("started_at"),
+  completedAt: text("completed_at"),
+});
+
 // ── Jarvis audio cache ────────────────────────────────────────────────────
 export const audioCache = sqliteTable("audio_cache", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -298,6 +310,21 @@ export type InsertResult = z.infer<typeof insertResultSchema>;
 export type Settings = typeof settings.$inferSelect;
 export type InsertSettings = z.infer<typeof insertSettingsSchema>;
 export type AudioCache = typeof audioCache.$inferSelect;
+export type CardShow = typeof cardShows.$inferSelect;
+
+// ── Daily Show manifest (written to disk + stored in card_shows.manifestJson) ─
+export interface ShowSegment {
+  id: string; // "overview" | "r1" | "r2" ...
+  label: string; // "Overview" | "R1 Alw 26500 N2L"
+  filename: string; // "overview.mp4" | "r1.mp4"
+  durationSec: number;
+}
+export interface ShowManifest {
+  cardId: number;
+  track: string;
+  generatedAt: string; // ISO timestamp
+  segments: ShowSegment[];
+}
 
 // Server-built Suggested Wagers, attached to every race the API returns so the
 // Race Detail view and the Print sheet render byte-identical numbers. Mirrors
