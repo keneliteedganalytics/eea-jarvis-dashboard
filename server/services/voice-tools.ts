@@ -15,6 +15,14 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getRaceWeather } from "./weather";
 import { computeBloodstockFitness } from "../bloodstock";
 import { DEFAULT_WEIGHTS } from "./eea-config";
+import { storage } from "../storage";
+import {
+  buildAnalyticsSummary,
+  buildLifetimeStats,
+  buildTrackRecordSummary,
+} from "../analytics";
+import { getOrFetchBias } from "./bias-fetcher";
+import { fetchOtbFingerLakes } from "./otb-finger-lakes";
 import type { CardWithRaces, RaceWithResult } from "@shared/schema";
 import type { RaceConditions } from "./parsers/types";
 
@@ -142,6 +150,106 @@ export const VOICE_TOOLS: Anthropic.Tool[] = [
     description:
       "Get a compact structured briefing of the whole card (track, date, headline plays, " +
       "tier counts) to synthesize a 2-3 sentence spoken summary. Use for 'give me the briefing'.",
+    input_schema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  // ── PR #23: comprehensive dashboard Q&A tools ──────────────────────────────
+  {
+    name: "get_pnl_today",
+    description:
+      "Today's profit & loss: flat-bet units won/lost today, ROI%, races graded today, and " +
+      "races still pending today. Use for 'how much have we made today', 'are we up or down', " +
+      "'what's our P&L'.",
+    input_schema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "get_lifetime_stats",
+    description:
+      "Lifetime scorecard across every card ever loaded: total cards/races/graded, win/place/" +
+      "show/ITM/exacta/tri/super hit rates, flag accuracy, and a per-track breakdown. Use for " +
+      "'lifetime hit rate', 'how are we doing at Finger Lakes overall'.",
+    input_schema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "get_analytics_summary",
+    description:
+      "Performance analytics: graded races, average win%, bankroll-weighted ROI%, best tier, " +
+      "per-tier hit rates, flag accuracy, and race-type performance. Use for 'which tier is best', " +
+      "'what's our ROI', 'how does SNIPER do vs EDGE'.",
+    input_schema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "get_tier_performance",
+    description:
+      "Hit rates (win/place/show/ITM) for one tier, or all tiers if none given. Use for " +
+      "'how's SNIPER doing', 'show me EDGE performance'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        tier: {
+          type: "string",
+          enum: TIERS as unknown as string[],
+          description: "Tier to detail. Omit for all tiers.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_track_record",
+    description:
+      "Marketing-grade public track record: lifetime cards/races/graded plus overall win/place/" +
+      "show/ITM and the strongest tracks by volume. Use for 'what's our public track record'.",
+    input_schema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "get_card_details",
+    description:
+      "Detail for a specific card by id or track name (fuzzy), defaulting to the latest active " +
+      "card: track, date, status, conviction, race count, and per-race tier + post time. Use for " +
+      "'what's on the card today', 'tell me about the Finger Lakes card'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        cardId: { type: "integer", description: "Card id. Takes precedence over track." },
+        track: { type: "string", description: "Track name, fuzzy-matched. Used if cardId omitted." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_postmortems",
+    description:
+      "Postmortem narrative for a graded card (defaults to the latest graded card): how the day " +
+      "went — wins, ITM, biggest hits and misses by tier. Use for 'what did we learn from " +
+      "yesterday', 'how did Saratoga go'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        cardId: { type: "integer", description: "Card id. Defaults to the latest graded card." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_bias_today",
+    description:
+      "Track bias read for today's card (post-position / rail / run-style tendencies derived from " +
+      "recent results). Use for 'what's the rail playing like', 'any bias at Finger Lakes'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        track: { type: "string", description: "Track to read. Defaults to the active card's track." },
+        date: { type: "string", description: "ISO date (YYYY-MM-DD). Defaults to the active card's date." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_otb_finger_lakes_status",
+    description:
+      "OffTrackBetting's live Finger Lakes view: late scratches, track conditions, and latest " +
+      "results — a fallback source independent of our native feed. Use for 'what's OTB saying " +
+      "about Finger Lakes', 'any late scratches at Finger Lakes'.",
     input_schema: { type: "object", properties: {}, additionalProperties: false },
   },
 ];
@@ -372,6 +480,250 @@ export function summarizeCard(_input: unknown, ctx: ToolContext): ToolResult {
   }
 }
 
+// ── PR #23 Q&A handlers ─────────────────────────────────────────────────────
+// These read aggregate dashboard data directly from the analytics layer +
+// storage (the same source the HTTP routes use), so the voice loop answers from
+// real numbers without a loopback fetch. All resolve to `{ error }` on failure.
+
+// Flat-bet units for one graded race: +winPayout/2-1 on a win (or +1.5u when the
+// payout wasn't captured), -1u on a loss. Mirrors analytics.unitsForRace so the
+// P&L spoken to Ken matches the public track-record math.
+function unitsForRace(r: RaceWithResult): number {
+  if (!r.result) return 0;
+  if (r.result.winHit) {
+    const wp = r.result.winPayout;
+    return wp && wp > 0 ? wp / 2 - 1 : 1.5;
+  }
+  return -1;
+}
+
+// Today's P&L from every card dated today (track-agnostic). Graded = result
+// logged; pending = a non-PASS play still awaiting a result.
+export function getPnlToday(_input: unknown, _ctx: ToolContext): ToolResult {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const cards = storage
+      .getCards()
+      .filter((c) => c.date === today)
+      .map((c) => storage.getCardWithRaces(c.id))
+      .filter((c): c is CardWithRaces => !!c);
+
+    const races = cards.flatMap((c) => c.races);
+    const graded = races.filter((r) => r.result);
+    const pending = races.filter((r) => !r.result && r.tier !== "PASS");
+    const units = graded.reduce((a, r) => a + unitsForRace(r), 0);
+    const wins = graded.filter((r) => r.result?.winHit).length;
+    const roi = graded.length > 0 ? Math.round((units / graded.length) * 1000) / 10 : null;
+
+    return {
+      date: today,
+      cards: cards.length,
+      units: Math.round(units * 10) / 10,
+      roiPct: roi,
+      wins,
+      gradedToday: graded.length,
+      pendingToday: pending.length,
+    };
+  } catch (e) {
+    return { error: `P&L lookup failed: ${(e as Error).message}` };
+  }
+}
+
+export function getLifetimeStats(_input: unknown, _ctx: ToolContext): ToolResult {
+  try {
+    return buildLifetimeStats() as unknown as Record<string, unknown>;
+  } catch (e) {
+    return { error: `Lifetime stats failed: ${(e as Error).message}` };
+  }
+}
+
+export function getAnalyticsSummary(_input: unknown, _ctx: ToolContext): ToolResult {
+  try {
+    return buildAnalyticsSummary() as unknown as Record<string, unknown>;
+  } catch (e) {
+    return { error: `Analytics summary failed: ${(e as Error).message}` };
+  }
+}
+
+export function getTierPerformance(input: { tier?: string }, _ctx: ToolContext): ToolResult {
+  try {
+    const summary = buildAnalyticsSummary();
+    if (input.tier) {
+      const row = summary.tierHitRates.find((t) => t.tier === input.tier);
+      if (!row) return { tier: input.tier, hitRates: null, note: `No graded ${input.tier} races yet.` };
+      return { tier: input.tier, hitRates: row, roi: summary.roi, bestTier: summary.bestTier };
+    }
+    return { tiers: summary.tierHitRates, roi: summary.roi, bestTier: summary.bestTier };
+  } catch (e) {
+    return { error: `Tier performance failed: ${(e as Error).message}` };
+  }
+}
+
+export function getTrackRecord(_input: unknown, _ctx: ToolContext): ToolResult {
+  try {
+    const { totals, byTrack } = buildLifetimeStats();
+    const topTracks = [...byTrack]
+      .sort((a, b) => b.graded - a.graded || b.races - a.races || a.track.localeCompare(b.track))
+      .slice(0, 5)
+      .map((t) => ({ track: t.track, graded: t.graded, win: t.win, itm: t.itm }));
+    return {
+      cards: totals.cards,
+      races: totals.races,
+      graded: totals.graded,
+      win: totals.win,
+      place: totals.place,
+      show: totals.show,
+      itm: totals.itm,
+      topTracks,
+    };
+  } catch (e) {
+    return { error: `Track record failed: ${(e as Error).message}` };
+  }
+}
+
+// Resolve a card by id, then fuzzy track match, then fall back to the active
+// card in context, then the latest card overall. Never throws.
+function resolveCard(
+  ctx: ToolContext,
+  opts: { cardId?: number; track?: string },
+): CardWithRaces | undefined {
+  if (opts.cardId != null) {
+    const c = storage.getCardWithRaces(opts.cardId);
+    if (c) return c;
+  }
+  if (opts.track) {
+    const needle = opts.track.toLowerCase();
+    const match = storage
+      .getCards()
+      .filter((c) => c.track.toLowerCase().includes(needle))
+      .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+    if (match) return storage.getCardWithRaces(match.id);
+  }
+  return ctx.card ?? storage.getLatestCard();
+}
+
+export function getCardDetails(input: { cardId?: number; track?: string }, ctx: ToolContext): ToolResult {
+  try {
+    const card = resolveCard(ctx, input);
+    if (!card) return { error: "No card found to detail." };
+    return {
+      cardId: card.id,
+      track: card.track,
+      date: card.date,
+      status: card.status,
+      conviction: card.cardConviction,
+      raceCount: card.races.length,
+      races: card.races.map((r) => ({
+        raceNumber: r.raceNumber,
+        tier: r.tier,
+        post: r.post,
+        conditions: r.conditions,
+      })),
+    };
+  } catch (e) {
+    return { error: `Card details failed: ${(e as Error).message}` };
+  }
+}
+
+// Postmortem narrative for a graded card. Defaults to the most recent card that
+// has at least one logged result. Returns structured signal the LLM narrates.
+export function getPostmortems(input: { cardId?: number }, ctx: ToolContext): ToolResult {
+  try {
+    let card: CardWithRaces | undefined;
+    if (input.cardId != null) {
+      card = storage.getCardWithRaces(input.cardId);
+    } else {
+      card = storage
+        .getCards()
+        .sort((a, b) => (a.date < b.date ? 1 : -1))
+        .map((c) => storage.getCardWithRaces(c.id))
+        .find((c): c is CardWithRaces => !!c && c.races.some((r) => r.result));
+      card = card ?? ctx.card;
+    }
+    if (!card) return { error: "No graded card to review." };
+
+    const graded = card.races.filter((r) => r.result);
+    if (graded.length === 0) {
+      return {
+        cardId: card.id,
+        track: card.track,
+        date: card.date,
+        gradedRaces: 0,
+        note: "No results logged yet for this card.",
+      };
+    }
+    const wins = graded.filter((r) => r.result?.winHit);
+    const itm = graded.filter((r) => (r.result?.itmCount ?? 0) > 0);
+    const hits = wins.map((r) => ({
+      raceNumber: r.raceNumber,
+      tier: r.tier,
+      pgm: r.winPgm,
+      name: r.winName,
+      winPayout: r.result?.winPayout ?? null,
+    }));
+    const misses = graded
+      .filter((r) => !r.result?.winHit && (r.result?.itmCount ?? 0) === 0 && r.tier !== "PASS")
+      .map((r) => ({ raceNumber: r.raceNumber, tier: r.tier, pgm: r.winPgm, name: r.winName }));
+
+    return {
+      cardId: card.id,
+      track: card.track,
+      date: card.date,
+      gradedRaces: graded.length,
+      wins: wins.length,
+      itm: itm.length,
+      winRate: Math.round((wins.length / graded.length) * 100),
+      hits,
+      misses,
+    };
+  } catch (e) {
+    return { error: `Postmortem failed: ${(e as Error).message}` };
+  }
+}
+
+export async function getBiasToday(
+  input: { track?: string; date?: string },
+  ctx: ToolContext,
+): Promise<ToolResult> {
+  try {
+    const track = input.track || ctx.card?.track;
+    const date = input.date || ctx.card?.date || new Date().toISOString().slice(0, 10);
+    if (!track) return { error: "No track to read bias for." };
+    const bias = await getOrFetchBias(track, date);
+    if (!bias) return { track, date, bias: null, note: "No bias read available yet." };
+    return {
+      track: bias.track,
+      date: bias.date,
+      racesAnalyzed: bias.racesAnalyzed,
+      railBias: bias.railBias,
+      runStyleBias: bias.runStyleBias,
+      narrative: bias.narrative,
+      gapNote: bias.gapNote ?? null,
+    };
+  } catch (e) {
+    return { error: `Bias lookup failed: ${(e as Error).message}` };
+  }
+}
+
+export async function getOtbFingerLakesStatus(_input: unknown, _ctx: ToolContext): Promise<ToolResult> {
+  try {
+    const data = await fetchOtbFingerLakes();
+    if (!data) {
+      return { available: false, note: "OffTrackBetting Finger Lakes data is unavailable right now." };
+    }
+    return {
+      available: true,
+      date: data.date,
+      scratches: data.scratches,
+      conditions: data.conditions,
+      results: data.results,
+      fetchedAt: data.fetchedAt,
+    };
+  } catch (e) {
+    return { error: `OTB Finger Lakes lookup failed: ${(e as Error).message}` };
+  }
+}
+
 // Dispatch a tool_use block to its handler. Unknown tools resolve to an error
 // result rather than throwing so the loop can continue.
 export async function runTool(name: string, input: unknown, ctx: ToolContext): Promise<ToolResult> {
@@ -394,6 +746,24 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
       );
     case "summarize_card":
       return summarizeCard(i, ctx);
+    case "get_pnl_today":
+      return getPnlToday(i, ctx);
+    case "get_lifetime_stats":
+      return getLifetimeStats(i, ctx);
+    case "get_analytics_summary":
+      return getAnalyticsSummary(i, ctx);
+    case "get_tier_performance":
+      return getTierPerformance(i as { tier?: string }, ctx);
+    case "get_track_record":
+      return getTrackRecord(i, ctx);
+    case "get_card_details":
+      return getCardDetails(i as { cardId?: number; track?: string }, ctx);
+    case "get_postmortems":
+      return getPostmortems(i as { cardId?: number }, ctx);
+    case "get_bias_today":
+      return getBiasToday(i as { track?: string; date?: string }, ctx);
+    case "get_otb_finger_lakes_status":
+      return getOtbFingerLakesStatus(i, ctx);
     default:
       return { error: `Unknown tool: ${name}` };
   }

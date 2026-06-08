@@ -14,7 +14,11 @@
 import { sqlite } from "../db";
 import { storage } from "../storage";
 import { resolveTrackLocation } from "./weather";
-import { refreshScratchesForCard, isScratchRefreshError } from "./scratch-refresh";
+import {
+  refreshScratchesForCard,
+  isScratchRefreshError,
+  mergeOtbScratches,
+} from "./scratch-refresh";
 
 const REFRESH_MS = 15 * 60 * 1000;
 const WINDOW_OPEN_LOCAL_HOUR = 10; // 10am track-local
@@ -109,7 +113,11 @@ export function scratchTargets(now: Date = new Date()): CardRosterRow[] {
 
 // Run one sweep: for every in-window locked card with a future post, refresh
 // scratches and log the summary at INFO. Never throws.
-export function refreshScratchesNow(now: Date = new Date()): { swept: number } {
+//
+// OTB fallback (PR #23): when the native refresh finds zero new scratches for a
+// Finger Lakes card, also query OffTrackBetting and merge any scratches it lists
+// that we haven't flagged. Async because the OTB fetch is over the network.
+export async function refreshScratchesNow(now: Date = new Date()): Promise<{ swept: number }> {
   let swept = 0;
   for (const card of scratchTargets(now)) {
     const loc = resolveTrackLocation(card.track);
@@ -128,6 +136,15 @@ export function refreshScratchesNow(now: Date = new Date()): { swept: number } {
             `${result.racesChecked} races, ${result.newScratches.length} scratched, ` +
             `${result.reinstated.length} reinstated`,
         );
+        // Fall back to OTB only when the native source found nothing for FLX.
+        if (result.newScratches.length === 0 && card.track === "Finger Lakes") {
+          const merged = await mergeOtbScratches(card.card_id);
+          if (merged.length > 0) {
+            console.log(
+              `[scratch-refresh] OTB fallback found ${merged.length} additional scratches for card ${card.card_id}`,
+            );
+          }
+        }
       }
       swept++;
     } catch (e) {
@@ -138,11 +155,9 @@ export function refreshScratchesNow(now: Date = new Date()): { swept: number } {
 }
 
 function scheduleSweep(): void {
-  try {
-    refreshScratchesNow();
-  } catch (e) {
+  refreshScratchesNow().catch((e) => {
     console.error("[scratch-cron] sweep error:", e);
-  }
+  });
 }
 
 export function startScratchRefreshCron(): void {

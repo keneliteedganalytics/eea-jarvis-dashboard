@@ -8,6 +8,15 @@ import {
   proposeTierChange,
   summarizeCard,
   runTool,
+  getPnlToday,
+  getLifetimeStats,
+  getAnalyticsSummary,
+  getTierPerformance,
+  getTrackRecord,
+  getCardDetails,
+  getPostmortems,
+  getBiasToday,
+  getOtbFingerLakesStatus,
   type ToolContext,
 } from "../services/voice-tools";
 
@@ -25,6 +34,75 @@ vi.mock("../services/weather", () => ({
     fetchedAt: "2026-06-08T18:00:00.000Z",
     source: "openweather",
   })),
+}));
+
+// ── Mocks for PR #23 Q&A handlers (offline + deterministic) ──────────────────
+vi.mock("../analytics", () => ({
+  buildAnalyticsSummary: vi.fn(() => ({
+    totalCards: 2,
+    totalRaces: 18,
+    gradedRaces: 10,
+    avgWinPct: 40,
+    roi: 12,
+    bestTier: "SNIPER",
+    tierHitRates: [
+      { tier: "SNIPER", win: 55, place: 70, show: 80, itm: 60 },
+      { tier: "EDGE", win: 35, place: 55, show: 70, itm: 50 },
+    ],
+    bankrollCurve: [{ label: "Start", cumulative: 0 }],
+    flagAccuracy: [{ flag: "BOUNCE RISK", pct: 50 }],
+    raceTypePerf: [{ type: "Allowance", winPct: 44 }],
+  })),
+  buildLifetimeStats: vi.fn(() => ({
+    totals: { cards: 5, races: 45, graded: 30, win: 38, place: 55, show: 68, itm: 62 },
+    byTrack: [
+      { track: "Finger Lakes", cards: 3, races: 27, graded: 18, win: 40, itm: 64, lastUpdated: "2026-06-08" },
+      { track: "Saratoga", cards: 2, races: 18, graded: 12, win: 35, itm: 58, lastUpdated: "2026-06-07" },
+    ],
+  })),
+  buildTrackRecordSummary: vi.fn(() => ({
+    timeframe: "ALL",
+    wins: 11,
+    plays: 30,
+    winPct: 37,
+    units: 6.5,
+    roi: 21.7,
+    tiers: [],
+    generatedAt: "2026-06-08T18:00:00.000Z",
+  })),
+}));
+
+vi.mock("../services/bias-fetcher", () => ({
+  getOrFetchBias: vi.fn(async (track: string, date: string) => ({
+    track,
+    date,
+    racesAnalyzed: 8,
+    postPos: {},
+    runStyleBias: "speed",
+    railBias: "good",
+    narrative: "Inside speed dominated yesterday at the Spa.",
+  })),
+}));
+
+vi.mock("../services/otb-finger-lakes", () => ({
+  fetchOtbFingerLakes: vi.fn(async () => ({
+    date: "2026-06-08",
+    scratches: [{ race: 3, program: "7", horse: "Late Mover" }],
+    conditions: { surface: "Dirt", condition: "Fast" },
+    results: [{ race: 1, finishers: [{ pos: 1, program: "4", horse: "Tapit Trice" }] }],
+    payouts: [],
+    purses: [],
+    fetchedAt: "2026-06-08T18:00:00.000Z",
+  })),
+}));
+
+const cardsStore: any[] = [];
+vi.mock("../storage", () => ({
+  storage: {
+    getCards: vi.fn(() => cardsStore.map((c) => ({ id: c.id, track: c.track, date: c.date }))),
+    getCardWithRaces: vi.fn((id: number) => cardsStore.find((c) => c.id === id)),
+    getLatestCard: vi.fn(() => cardsStore.slice().sort((a, b) => (a.date < b.date ? 1 : -1))[0]),
+  },
 }));
 
 import { getTrackWeather } from "../services/voice-tools";
@@ -202,5 +280,154 @@ describe("voice tool handlers — happy + error paths", () => {
     expect(out.track).toBe("Saratoga");
     const bad = (await runTool("nope", {}, ctx())) as any;
     expect(bad.error).toMatch(/Unknown tool/);
+  });
+});
+
+// ── PR #23 Q&A handler smoke tests (mocked analytics/storage/bias/OTB) ────────
+import { storage } from "../storage";
+
+function gradedRace(n: number, opts: { tier: string; winHit: boolean; winPayout?: number; result?: boolean }) {
+  return {
+    raceNumber: n,
+    tier: opts.tier,
+    post: "1:00 PM",
+    conditions: "ALW 60000 6F DIRT",
+    winPgm: "4",
+    winName: "Tapit Trice",
+    flags: "[]",
+    result: opts.result === false ? null : {
+      winHit: opts.winHit,
+      itmCount: opts.winHit ? 4 : 0,
+      winPayout: opts.winPayout ?? null,
+    },
+  };
+}
+
+describe("PR #23 Q&A handlers — shape + offline", () => {
+  const today = new Date().toISOString().slice(0, 10);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Seed the mocked storage with a graded card dated today + an older card.
+    (storage.getCards as any).mockReturnValue([
+      { id: 1, track: "Finger Lakes", date: today },
+      { id: 2, track: "Saratoga", date: "2026-06-01" },
+    ]);
+    (storage.getCardWithRaces as any).mockImplementation((id: number) => {
+      if (id === 1) {
+        return {
+          id: 1,
+          track: "Finger Lakes",
+          date: today,
+          status: "active",
+          cardConviction: "HIGH",
+          races: [
+            gradedRace(1, { tier: "SNIPER", winHit: true, winPayout: 8.4 }),
+            gradedRace(2, { tier: "EDGE", winHit: false }),
+            gradedRace(3, { tier: "DUAL", winHit: false, result: false }), // pending
+          ],
+        };
+      }
+      if (id === 2) {
+        return {
+          id: 2,
+          track: "Saratoga",
+          date: "2026-06-01",
+          status: "archived",
+          cardConviction: "MEDIUM",
+          races: [gradedRace(1, { tier: "SNIPER", winHit: true, winPayout: 6.0 })],
+        };
+      }
+      return undefined;
+    });
+    (storage.getLatestCard as any).mockReturnValue({
+      id: 1,
+      track: "Finger Lakes",
+      date: today,
+      status: "active",
+      cardConviction: "HIGH",
+      races: [gradedRace(1, { tier: "SNIPER", winHit: true, winPayout: 8.4 })],
+    });
+  });
+
+  it("get_pnl_today aggregates today's graded + pending and computes ROI", () => {
+    const out = getPnlToday({}, ctx()) as any;
+    expect(out.date).toBe(today);
+    expect(out.gradedToday).toBe(2); // races 1 & 2 graded
+    expect(out.pendingToday).toBe(1); // race 3 pending, non-PASS
+    expect(out.wins).toBe(1);
+    expect(typeof out.units).toBe("number");
+    expect(typeof out.roiPct).toBe("number");
+  });
+
+  it("get_lifetime_stats returns totals + byTrack", () => {
+    const out = getLifetimeStats({}, ctx()) as any;
+    expect(out.totals.cards).toBe(5);
+    expect(out.byTrack[0].track).toBe("Finger Lakes");
+  });
+
+  it("get_analytics_summary returns tier hit rates + roi + bestTier", () => {
+    const out = getAnalyticsSummary({}, ctx()) as any;
+    expect(out.roi).toBe(12);
+    expect(out.bestTier).toBe("SNIPER");
+    expect(out.tierHitRates).toHaveLength(2);
+  });
+
+  it("get_tier_performance filters to a single tier", () => {
+    const out = getTierPerformance({ tier: "SNIPER" }, ctx()) as any;
+    expect(out.tier).toBe("SNIPER");
+    expect(out.hitRates).toMatchObject({ win: 55 });
+  });
+
+  it("get_tier_performance returns all tiers when none given", () => {
+    const out = getTierPerformance({}, ctx()) as any;
+    expect(out.tiers).toHaveLength(2);
+  });
+
+  it("get_track_record returns aggregate totals + top tracks", () => {
+    const out = getTrackRecord({}, ctx()) as any;
+    expect(out.cards).toBe(5);
+    expect(out.topTracks[0].track).toBe("Finger Lakes");
+  });
+
+  it("get_card_details resolves by track fuzzy match", () => {
+    const out = getCardDetails({ track: "finger" }, ctx()) as any;
+    expect(out.track).toBe("Finger Lakes");
+    expect(out.raceCount).toBe(3);
+    expect(out.races[0]).toMatchObject({ raceNumber: 1, tier: "SNIPER" });
+  });
+
+  it("get_card_details resolves by cardId", () => {
+    const out = getCardDetails({ cardId: 2 }, ctx()) as any;
+    expect(out.track).toBe("Saratoga");
+    expect(out.status).toBe("archived");
+  });
+
+  it("get_postmortems summarizes a graded card's hits/misses", () => {
+    const out = getPostmortems({ cardId: 1 }, ctx()) as any;
+    expect(out.gradedRaces).toBe(2);
+    expect(out.wins).toBe(1);
+    expect(out.hits[0]).toMatchObject({ raceNumber: 1, name: "Tapit Trice" });
+  });
+
+  it("get_bias_today returns the bias read for the active card's track", async () => {
+    const out = (await getBiasToday({}, ctx())) as any;
+    expect(out.track).toBe("Saratoga"); // ctx() card is Saratoga
+    expect(out.railBias).toBe("good");
+    expect(out.narrative).toMatch(/speed/i);
+  });
+
+  it("get_otb_finger_lakes_status returns scratches + conditions", async () => {
+    const out = (await getOtbFingerLakesStatus({}, ctx())) as any;
+    expect(out.available).toBe(true);
+    expect(out.scratches[0]).toMatchObject({ race: 3, program: "7" });
+    expect(out.conditions).toMatchObject({ surface: "Dirt" });
+  });
+
+  it("runTool dispatches the new Q&A tools", async () => {
+    const pnl = (await runTool("get_pnl_today", {}, ctx())) as any;
+    expect(pnl.date).toBe(today);
+    const otb = (await runTool("get_otb_finger_lakes_status", {}, ctx())) as any;
+    expect(otb.available).toBe(true);
   });
 });
