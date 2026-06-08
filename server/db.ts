@@ -206,6 +206,21 @@ CREATE TABLE IF NOT EXISTS card_shows (
   started_at TEXT,
   completed_at TEXT
 );
+
+-- Equibase daily PP auto-ingest telemetry. One row per ingest attempt (cron or
+-- manual). results_json holds the per-track outcome array so a run can be
+-- replayed/debugged after the fact — we are not watching it run live.
+CREATE TABLE IF NOT EXISTS equibase_ingest_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  race_date TEXT NOT NULL,
+  track_codes TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  status TEXT NOT NULL,
+  results_json TEXT NOT NULL DEFAULT '[]',
+  error TEXT,
+  started_at TEXT NOT NULL,
+  completed_at TEXT
+);
 `);
 
 // Idempotent settings-column migration for installs that predate EEA v1.

@@ -32,6 +32,8 @@ import { addSseClient, removeSseClient } from "./services/events";
 import { startPoller, runPollerNow } from "./services/poller";
 import { voiceRouter } from "./routes/voice";
 import { showApiRouter, showFileRouter } from "./routes/show";
+import { equibaseAdminRouter } from "./routes/equibase";
+import { startEquibaseIngestCron } from "./services/equibase-cron";
 
 // Helper: load TTS settings (voice / model / speed) from storage.
 function ttsSettings(): { voiceId: string; modelId: string; speed: number } {
@@ -57,6 +59,9 @@ export async function registerRoutes(
   sweepArchive(storage);
   setInterval(() => sweepArchive(storage), 60 * 60 * 1000).unref();
   startPoller();
+  // Daily 6am-MDT Equibase PP auto-ingest (one hour before the 7am show build).
+  // Production-only so local dev never hits the live subscription.
+  startEquibaseIngestCron();
 
   // ── Cards ────────────────────────────────────────────────────────────────
   // Default to active cards only so the main dashboard never shows past cards.
@@ -495,6 +500,9 @@ export async function registerRoutes(
   // ── Trackside Daily Show ──────────────────────────────────────────────────
   app.use("/api/show", showApiRouter());
   app.use("/show", showFileRouter());
+
+  // ── Equibase PP ingest admin (behind global basic auth) ───────────────────
+  app.use("/api/admin/equibase", equibaseAdminRouter());
 
   // ── Voices proxy ─────────────────────────────────────────────────────────
   app.get("/api/voices", async (_req, res) => {
