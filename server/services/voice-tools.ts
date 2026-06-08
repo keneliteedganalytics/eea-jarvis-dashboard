@@ -29,7 +29,13 @@ import {
   runDeepPostmortemToday,
   getDeepPostmortem,
 } from "./deep-postmortem";
-import type { CardWithRaces, RaceWithResult, DeepPostmortem } from "@shared/schema";
+import { runFusionReplay, runFusionReplayToday } from "./fusion-replay";
+import type {
+  CardWithRaces,
+  RaceWithResult,
+  DeepPostmortem,
+  FusionReplay,
+} from "@shared/schema";
 import type { RaceConditions } from "./parsers/types";
 
 const TIERS = ["SNIPER", "EDGE", "DUAL", "RECON", "PASS"] as const;
@@ -345,6 +351,17 @@ export const VOICE_TOOLS: Anthropic.Tool[] = [
       },
       required: ["cardId"],
       additionalProperties: false,
+    },
+  },
+  {
+    name: "run_fusion_replay",
+    description:
+      "Replay today's graded card(s) through the latest fusion logic without re-ingesting. Shows how many misses the new tier-tuning rules would have caught. Use when user says 'replay', 'rerun fusion', 'how would the new rules have done', 'simulate'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        cardId: { type: "number", description: "Card to replay. Omit for today's card." },
+      },
     },
   },
 ];
@@ -849,6 +866,51 @@ export function getDeepPostmortemTool(
   }
 }
 
+// Compact a FusionReplay into the spoken-friendly summary Scarlett reads. The
+// race-by-race diff lives on the Postmortem page, not in the spoken reply.
+function summarizeFusionReplay(r: FusionReplay): ToolResult {
+  const s = r.summary;
+  const net = s.netImprovement >= 0 ? `+${s.netImprovement}` : `${s.netImprovement}`;
+  return {
+    cardId: r.cardId,
+    track: r.track,
+    date: r.date,
+    raceCount: r.raceCount,
+    graded: r.graded,
+    summary: s,
+    spoken:
+      `Replayed card ${r.cardId}. New rules caught ${s.missesCaught} misses, ` +
+      `introduced ${s.missesIntroduced}, net improvement ${net}. ` +
+      `Open the Postmortem page for race-by-race breakdown.`,
+    note: "Open the Postmortem page for the full race-by-race diff.",
+  };
+}
+
+// Replay a card (or today's graded cards) through the latest fusion logic.
+// Informational — never pushes to ctx.actions, so the reply stays on Scarlett.
+export function runFusionReplayTool(
+  input: { cardId?: number },
+  ctx: ToolContext,
+): ToolResult {
+  try {
+    const cardId = input.cardId ?? ctx.card?.id;
+    if (cardId != null) {
+      return summarizeFusionReplay(runFusionReplay(cardId));
+    }
+    const replays = runFusionReplayToday();
+    if (replays.length === 0) {
+      return { count: 0, note: "No graded cards from today to replay yet." };
+    }
+    return {
+      count: replays.length,
+      cards: replays.map(summarizeFusionReplay),
+      note: "Open the Postmortem page for the full race-by-race diff.",
+    };
+  } catch (e) {
+    return { error: `Fusion replay failed: ${(e as Error).message}` };
+  }
+}
+
 export async function getBiasToday(
   input: { track?: string; date?: string },
   ctx: ToolContext,
@@ -1015,6 +1077,8 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
       );
     case "get_deep_postmortem":
       return getDeepPostmortemTool(i as { cardId?: number }, ctx);
+    case "run_fusion_replay":
+      return runFusionReplayTool(i as { cardId?: number }, ctx);
     default:
       return { error: `Unknown tool: ${name}` };
   }

@@ -542,6 +542,40 @@ export interface DeepPostmortem {
   systemicFlags: string[];
 }
 
+// ── Fusion Replay (PR #28) ────────────────────────────────────────────────
+// Re-runs an already-graded card through PR #27's tier-tuning v2 rules against
+// the PRESERVED predictions snapshot (no re-ingest), and reports per-race the
+// original tier/top-pick vs. the replayed one, which v2 rules fired, and — for
+// graded races — whether the new logic would have caught (or lost) the winner.
+export interface FusionRaceDiff {
+  raceNumber: number;
+  actualWinner: { program: string; horse: string };
+  original: { tier: string; topPick: string; rating: number };
+  replayed: { tier: string; topPick: string; rating: number };
+  changed: boolean;
+  newFlags: string[];
+  rulesFired: string[]; // ["DUAL_EARNED_CLASS_GATE", "RATING_GAP_PENALTY", ...]
+  wouldHaveCaught: boolean; // would the new top pick have won?
+  wouldHaveLost: boolean; // did the old top pick win but new logic flipped away?
+}
+
+export interface FusionReplay {
+  cardId: number;
+  track: string;
+  date: string;
+  generatedAt: string;
+  raceCount: number;
+  graded: number;
+  diffs: FusionRaceDiff[];
+  summary: {
+    tierChanges: number; // how many races changed tier
+    flagsAdded: number; // total v2 flags surfaced across the card
+    missesCaught: number; // races where new logic would have flipped to the winner
+    missesIntroduced: number; // races where new logic flipped AWAY from a winner
+    netImprovement: number; // missesCaught - missesIntroduced
+  };
+}
+
 // A single proposed (and later applied) tier/pick change for one race.
 export const tierChangeSchema = z.object({
   raceId: z.number().int(),

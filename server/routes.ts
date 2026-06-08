@@ -47,6 +47,7 @@ import {
   runDeepPostmortemToday,
   getDeepPostmortem,
 } from "./services/deep-postmortem";
+import { runFusionReplay, runFusionReplayToday } from "./services/fusion-replay";
 
 // Body schema for POST /api/cards/on-demand-ingest. Track is fuzzy-resolved
 // server-side; date is validated there too (this only enforces presence/shape).
@@ -298,6 +299,30 @@ export async function registerRoutes(
       res.json(reports);
     } catch (e) {
       console.error(`[deep-postmortem] today run failed:`, e);
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  // ── PR #28: Fusion Replay (tier-tuning v2 validation) ─────────────────────
+  // Re-run PR #27's assignTierV2 against the preserved predictions snapshot for
+  // one card (no re-ingest) and return the per-race diffs + summary.
+  app.post("/api/cards/:id/fusion-replay", (req, res) => {
+    const id = Number(req.params.id);
+    if (!storage.getCard(id)) return res.status(404).json({ error: "Card not found" });
+    try {
+      res.json(runFusionReplay(id));
+    } catch (e) {
+      console.error(`[fusion-replay] failed for card ${id}:`, e);
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  // Replay every graded card dated today. Returns an array of FusionReplay.
+  app.post("/api/fusion-replay/today", (_req, res) => {
+    try {
+      res.json(runFusionReplayToday());
+    } catch (e) {
+      console.error(`[fusion-replay] today run failed:`, e);
       res.status(500).json({ error: (e as Error).message });
     }
   });
