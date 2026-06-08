@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   formatRaceDateParam,
   mmdd,
@@ -7,6 +7,7 @@ import {
   buildDownloadUrl,
   parseAvailableTracks,
   parseSetCookies,
+  loginEquibase,
 } from "../services/equibase-ingest";
 import {
   boiseSixAmUtcHour,
@@ -125,6 +126,104 @@ describe("parseSetCookies", () => {
   it("ignores malformed cookie lines", () => {
     const jar = parseSetCookies(["", "novalue", "=orphan"]);
     expect(jar.size).toBe(0);
+  });
+});
+
+describe("loginEquibase redirect-chain cookie capture", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Build a Headers whose getSetCookie() returns the given lines, plus an
+  // optional Location, mirroring node's undici Headers behavior.
+  function makeHeaders(setCookies: string[], location?: string): Headers {
+    const h = new Headers();
+    for (const c of setCookies) h.append("set-cookie", c);
+    if (location) h.set("location", location);
+    return h;
+  }
+
+  function makeResponse(
+    status: number,
+    setCookies: string[],
+    location?: string,
+    body = "",
+  ): Response {
+    const res = {
+      status,
+      headers: makeHeaders(setCookies, location),
+      clone: () => makeResponse(status, setCookies, location, body),
+      text: async () => body,
+    };
+    return res as unknown as Response;
+  }
+
+  it("captures Set-Cookie that arrives on the 302 hop, not the final 200", async () => {
+    // Hop 0: POST -> 302 with CFID/CFTOKEN on the redirect, Location to landing.
+    // Hop 1: GET landing -> 200 with JSESSIONID and no further redirect.
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        makeResponse(
+          302,
+          ["CFID=12345; path=/; HttpOnly", "CFTOKEN=abcdef0123; path=/"],
+          "https://www.equibase.com/premium/landing.cfm",
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeResponse(200, ["JSESSIONID=ZZZ; path=/"]),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const jar = await loginEquibase("user", "pass");
+    expect(jar.get("CFID")).toBe("12345");
+    expect(jar.get("CFTOKEN")).toBe("abcdef0123");
+    expect(jar.get("JSESSIONID")).toBe("ZZZ");
+
+    // Second hop must carry the cookies gathered on the first hop.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const secondInit = fetchMock.mock.calls[1][1] as RequestInit;
+    expect((secondInit.headers as Record<string, string>).Cookie).toContain(
+      "CFID=12345",
+    );
+    expect(secondInit.method).toBe("GET");
+  });
+
+  it("sends a browser User-Agent on the login POST", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(makeResponse(200, ["CFID=1; path=/"]));
+    vi.stubGlobal("fetch", fetchMock);
+    await loginEquibase("user", "pass");
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    const ua = (init.headers as Record<string, string>)["User-Agent"];
+    expect(ua).toContain("Chrome/");
+    expect(ua).not.toContain("EEA-Dashboard");
+  });
+
+  it("throws when no session cookie is set across any hop", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(makeResponse(200, ["foo=bar; path=/"]));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(loginEquibase("user", "pass")).rejects.toThrow(
+      /did not set a session cookie/,
+    );
+  });
+
+  it("stops following redirects after MAX_LOGIN_HOPS", async () => {
+    // Always 302 to itself, never setting a session cookie -> must terminate.
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        makeResponse(302, [], "https://www.equibase.com/premium/loop.cfm"),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(loginEquibase("user", "pass")).rejects.toThrow(
+      /did not set a session cookie/,
+    );
+    // 1 POST + up to MAX_LOGIN_HOPS GETs; never unbounded.
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(6);
   });
 });
 

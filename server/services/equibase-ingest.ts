@@ -25,8 +25,18 @@ const PP_PAGE_URL = "https://www.equibase.com/premium/eqpEquibaseFullPP.cfm";
 const DOWNLOAD_BASE = "https://www.equibase.com/premium/eebDownloadFPPProgram.cfm";
 const PRODUCT_ID = "50300";
 
+// A real Chrome UA. Equibase serves a no-Set-Cookie path to obviously-bot UAs
+// (the prior "EEA-Dashboard" UA logged in 200 but never received CFID/CFTOKEN),
+// so we present as a current desktop Chrome on macOS.
 const USER_AGENT =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 EEA-Dashboard";
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+// Gated verbose logger for diagnosing the live login/cookie flow post-deploy.
+// Flip EQUIBASE_DEBUG=1 on Railway to dump each hop's status, location, and the
+// Set-Cookie names captured. Never logs cookie *values* or credentials.
+function debug(...args: unknown[]): void {
+  if (process.env.EQUIBASE_DEBUG === "1") console.log("[equibase-debug]", ...args);
+}
 
 // ── Data dir ────────────────────────────────────────────────────────────────
 // Mirror the AUDIO_DIR / showRoot convention: land on the Railway persistent
@@ -173,6 +183,14 @@ function extractSetCookies(headers: Headers): string[] {
   return single ? [single] : [];
 }
 
+// Fold a response's Set-Cookie headers into an existing jar in place. Later
+// hops overwrite earlier values for the same cookie name (standard behavior).
+function mergeSetCookies(jar: CookieJar, headers: Headers): string[] {
+  const lines = extractSetCookies(headers);
+  for (const [k, v] of Array.from(parseSetCookies(lines).entries())) jar.set(k, v);
+  return lines;
+}
+
 // ── HTML parsing ─────────────────────────────────────────────────────────────
 export interface AvailableTrack {
   trackCode: string;
@@ -221,6 +239,19 @@ export function parseAvailableTracks(html: string): AvailableTrack[] {
 }
 
 // ── I/O: login / list / download ────────────────────────────────────────────
+// Max redirect hops to follow after the login POST. ColdFusion typically does
+// one 302 to a landing page; a couple extra hops covers SSO bounce-backs.
+const MAX_LOGIN_HOPS = 5;
+
+// Log the session POST and capture cookies from EVERY hop.
+//
+// The original bug: login was POSTed with redirect:"manual" and we only read
+// Set-Cookie off that first response. Equibase sets CFID/CFTOKEN on the 302
+// hop's *landing* page, not the 302 itself, so the jar came back empty and the
+// run aborted with "login did not set a session cookie (HTTP 200)". We now walk
+// the redirect chain by hand, GET-ing each Location with the cookies gathered so
+// far and folding in every Set-Cookie we see. A real Chrome UA is sent on each
+// hop because Equibase gates cookies on the User-Agent.
 export async function loginEquibase(
   username: string,
   password: string,
@@ -232,7 +263,9 @@ export async function loginEquibase(
     login: "Login",
     rememberMe: "Y",
   });
-  const res = await fetch(LOGIN_URL, {
+
+  const jar: CookieJar = new Map();
+  let res = await fetch(LOGIN_URL, {
     method: "POST",
     redirect: "manual",
     headers: {
@@ -241,10 +274,41 @@ export async function loginEquibase(
     },
     body: body.toString(),
   });
-  const jar = parseSetCookies(extractSetCookies(res.headers));
+  let setLines = mergeSetCookies(jar, res.headers);
+  debug("login POST", LOGIN_URL, "->", res.status, {
+    location: res.headers.get("location"),
+    setCookies: parseSetCookies(setLines).size,
+    jar: Array.from(jar.keys()),
+  });
+  if (process.env.EQUIBASE_DEBUG === "1") {
+    const peek = (await res.clone().text()).slice(0, 500);
+    debug("login body[0..500]:", peek);
+  }
+
+  // Follow redirects manually, carrying the jar and capturing cookies per hop.
+  let url = LOGIN_URL;
+  for (let hop = 0; hop < MAX_LOGIN_HOPS; hop++) {
+    const status = res.status;
+    const location = res.headers.get("location");
+    if (status < 300 || status >= 400 || !location) break;
+    url = new URL(location, url).toString();
+    res = await fetch(url, {
+      method: "GET",
+      redirect: "manual",
+      headers: { "User-Agent": USER_AGENT, Cookie: cookieHeader(jar) },
+    });
+    setLines = mergeSetCookies(jar, res.headers);
+    debug(`login hop ${hop + 1}`, url, "->", res.status, {
+      location: res.headers.get("location"),
+      setCookies: parseSetCookies(setLines).size,
+      jar: Array.from(jar.keys()),
+    });
+  }
+
   if (!jar.has("CFID") && !jar.has("CFTOKEN") && !jar.has("JSESSIONID")) {
     throw new Error(
-      `Equibase login did not set a session cookie (HTTP ${res.status})`,
+      `Equibase login did not set a session cookie (HTTP ${res.status}; ` +
+        `set EQUIBASE_DEBUG=1 to dump the redirect chain)`,
     );
   }
   return jar;
