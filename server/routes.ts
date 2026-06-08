@@ -21,7 +21,7 @@ import { backfillNullScoreCards, sweepArchive } from "./services/card-finishing"
 import { getOrFetchBias, fetchBias } from "./services/bias-fetcher";
 import { sizeRaceBets } from "./services/bet-sizer";
 import { getOrGenerateRaceSummary } from "./services/race-summary";
-import { buildAnalyticsSummary, buildCardStats } from "./analytics";
+import { buildAnalyticsSummary, buildCardStats, buildLifetimeStats } from "./analytics";
 import {
   cardBriefingScript,
   raceBriefingScript,
@@ -373,6 +373,11 @@ export async function registerRoutes(
   // ── Analytics ────────────────────────────────────────────────────────────
   app.get("/api/analytics/summary", (_req, res) => {
     res.json(buildAnalyticsSummary());
+  });
+
+  // Lifetime scorecard — aggregates across ALL cards (active + archived).
+  app.get("/api/stats/lifetime", (_req, res) => {
+    res.json(buildLifetimeStats());
   });
 
   // ── Jarvis (TTS) ─────────────────────────────────────────────────────────

@@ -129,6 +129,124 @@ export function buildAnalyticsSummary() {
   };
 }
 
+// ── Lifetime scorecard (All-Time panel) ──────────────────────────────────
+// Aggregates across EVERY card ever loaded — active AND archived — with no
+// filter on cards.status. "Graded" mirrors the per-card panel's signal: a race
+// is graded once a result has been logged for it.
+export interface LifetimeTotals {
+  cards: number;
+  races: number;
+  graded: number;
+  win: number | null;
+  place: number | null;
+  show: number | null;
+  fourth: number | null;
+  exacta: number | null;
+  tri: number | null;
+  super: number | null;
+  itm: number | null;
+  flagAccuracy: number | null;
+}
+export interface LifetimeTrackRow {
+  track: string;
+  cards: number;
+  races: number;
+  graded: number;
+  win: number | null;
+  itm: number | null;
+}
+export interface LifetimeStats {
+  totals: LifetimeTotals;
+  byTrack: LifetimeTrackRow[];
+}
+
+function pctOrNull(n: number, d: number): number | null {
+  if (d <= 0) return null;
+  return Math.round((n / d) * 100);
+}
+
+export function buildLifetimeStats(): LifetimeStats {
+  const allCards = storage.getCards();
+  const fullCards: CardWithRaces[] = allCards
+    .map((c) => storage.getCardWithRaces(c.id))
+    .filter((c): c is CardWithRaces => !!c);
+
+  const tally = (races: RaceWithResult[]) => {
+    const graded = races.filter((r) => r.result);
+    const g = graded.length;
+    const winN = graded.filter((r) => r.result?.winHit).length;
+    const placeN = graded.filter((r) => r.result?.placeHit).length;
+    const showN = graded.filter((r) => r.result?.showHit).length;
+    const fourthN = graded.filter((r) => r.result?.fourthHit).length;
+    const exaN = graded.filter((r) => r.result?.exactaHit).length;
+    const triN = graded.filter((r) => r.result?.trifectaHit).length;
+    const supN = graded.filter((r) => r.result?.superfectaHit).length;
+    const itmN = graded.filter((r) => (r.result?.itmCount ?? 0) > 0).length;
+    let flagsRaised = 0;
+    let flagsHit = 0;
+    for (const r of graded) {
+      const flags = JSON.parse(r.flags || "[]") as string[];
+      flagsRaised += flags.length;
+      const hit = JSON.parse(r.result?.flagsHit || "[]") as string[];
+      flagsHit += hit.length;
+    }
+    return {
+      races: races.length,
+      graded: g,
+      win: pctOrNull(winN, g),
+      place: pctOrNull(placeN, g),
+      show: pctOrNull(showN, g),
+      fourth: pctOrNull(fourthN, g),
+      exacta: pctOrNull(exaN, g),
+      tri: pctOrNull(triN, g),
+      super: pctOrNull(supN, g),
+      itm: pctOrNull(itmN, g),
+      flagAccuracy: pctOrNull(flagsHit, flagsRaised),
+    };
+  };
+
+  const allRaces: RaceWithResult[] = fullCards.flatMap((c) => c.races);
+  const overall = tally(allRaces);
+  const totals: LifetimeTotals = {
+    cards: fullCards.length,
+    races: overall.races,
+    graded: overall.graded,
+    win: overall.win,
+    place: overall.place,
+    show: overall.show,
+    fourth: overall.fourth,
+    exacta: overall.exacta,
+    tri: overall.tri,
+    super: overall.super,
+    itm: overall.itm,
+    flagAccuracy: overall.flagAccuracy,
+  };
+
+  const byTrackMap = new Map<string, CardWithRaces[]>();
+  for (const c of fullCards) {
+    const list = byTrackMap.get(c.track) ?? [];
+    list.push(c);
+    byTrackMap.set(c.track, list);
+  }
+  const byTrack: LifetimeTrackRow[] = Array.from(byTrackMap.keys())
+    .sort((a, b) => a.localeCompare(b))
+    .map((track) => {
+      const trackCards = byTrackMap.get(track)!;
+      const trackRaces = trackCards.flatMap((c) => c.races);
+      const t = tally(trackRaces);
+      return {
+        track,
+        cards: trackCards.length,
+        races: t.races,
+        graded: t.graded,
+        win: t.win,
+        itm: t.itm,
+      };
+    });
+
+  return { totals, byTrack };
+}
+
 export function buildCardStats(card: CardWithRaces) {
   const graded = card.races.filter((r) => r.result);
   const winsHit = graded.filter((r) => r.result?.winHit).length;

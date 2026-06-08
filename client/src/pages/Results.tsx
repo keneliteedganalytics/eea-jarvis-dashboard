@@ -15,6 +15,29 @@ function pct(n: number, d: number): string {
   return `${Math.round((n / d) * 100)}%`;
 }
 
+// Lifetime stats endpoint contract (server/analytics.ts buildLifetimeStats).
+interface LifetimeStats {
+  totals: {
+    cards: number;
+    races: number;
+    graded: number;
+    win: number | null;
+    place: number | null;
+    show: number | null;
+    fourth: number | null;
+    exacta: number | null;
+    tri: number | null;
+    super: number | null;
+    itm: number | null;
+    flagAccuracy: number | null;
+  };
+  byTrack: { track: string; cards: number; races: number; graded: number; win: number | null; itm: number | null }[];
+}
+
+function pctVal(v: number | null): string {
+  return v === null ? "—" : `${v}%`;
+}
+
 function StatChip({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border border-gold/10 bg-navy-card px-3 py-2 text-center">
@@ -112,6 +135,7 @@ function ResultEntry({ race, autoRecap }: { race: RaceWithResult; autoRecap: boo
 export default function Results() {
   const { data: card, isLoading } = useQuery<CardWithRaces>({ queryKey: ["/api/cards/latest"] });
   const { data: settings } = useQuery<Settings>({ queryKey: ["/api/settings"] });
+  const { data: lifetime } = useQuery<LifetimeStats>({ queryKey: ["/api/stats/lifetime"] });
   const jarvis = useJarvis();
 
   if (isLoading || !card) {
@@ -195,12 +219,39 @@ export default function Results() {
             )}
           </div>
 
-          <div className="rounded-lg border border-gold/15 bg-navy-section p-4">
+          <div className="rounded-lg border border-gold/15 bg-navy-section p-4" data-testid="panel-all-time">
             <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-2">All-Time</div>
-            <div className="text-sm text-silver tabular-nums">1 card · {card.races.length} races</div>
-            <div className="mt-1 text-xs text-muted-brand tabular-nums">
-              Win {pct(winN, n)} · ITM {pct(itmTotal, n * 4)} · {n} of {card.races.length} graded
-            </div>
+            {!lifetime ? (
+              <>
+                <div className="text-sm text-silver tabular-nums">—</div>
+                <div className="mt-1 text-xs text-muted-brand tabular-nums">Win — · ITM —</div>
+              </>
+            ) : (
+              <>
+                <div className="text-sm text-silver tabular-nums" data-testid="all-time-totals">
+                  {lifetime.totals.cards} card{lifetime.totals.cards === 1 ? "" : "s"} · {lifetime.totals.races} races · {lifetime.totals.graded} of {lifetime.totals.races} graded
+                </div>
+                <div className="mt-1 text-xs text-muted-brand tabular-nums">
+                  Win {pctVal(lifetime.totals.win)} · ITM {pctVal(lifetime.totals.itm)}
+                </div>
+
+                <div className="mt-3 border-t border-gold/10 pt-3">
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-2">By Track</div>
+                  {lifetime.byTrack.length === 0 ? (
+                    <div className="text-xs text-muted-brand">No cards loaded yet.</div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {lifetime.byTrack.map((t) => (
+                        <div key={t.track} className="flex items-center gap-2 text-xs tabular-nums" data-testid={`all-time-track-${t.track}`}>
+                          <span className="flex-1 text-slate-brand truncate">{t.track}</span>
+                          <span className="text-muted-brand">{t.races} races · {t.graded}/{t.races} graded · {pctVal(t.win)} · {pctVal(t.itm)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
