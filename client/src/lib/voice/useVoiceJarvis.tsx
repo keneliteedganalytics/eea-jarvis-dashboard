@@ -178,6 +178,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
             jarvisResponse: data.spokenResponse,
             proposedChanges: data.proposedChanges,
             needsConfirmation: data.needsConfirmation,
+            voice: data.voice,
             status: data.needsConfirmation ? "pending" : undefined,
           },
         ]);

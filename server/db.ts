@@ -300,6 +300,12 @@ const settingsCols = new Set(
 const addCol = (name: string, ddl: string) => {
   if (!settingsCols.has(name)) sqlite.exec(`ALTER TABLE settings ADD COLUMN ${ddl}`);
 };
+// PR #22: second ElevenLabs voice (Scarlett / Sarah) for informational replies,
+// alongside the existing Jarvis (Brian) voice. Idempotent; defaults to Sarah.
+addCol(
+  "elevenlabs_voice_id_scarlett",
+  "elevenlabs_voice_id_scarlett TEXT NOT NULL DEFAULT 'EXAVITQu4vr4xnSDxMaL'",
+);
 addCol("anthropic_api_key", "anthropic_api_key TEXT NOT NULL DEFAULT ''");
 addCol("poe_api_key", "poe_api_key TEXT NOT NULL DEFAULT ''");
 addCol("default_llm_provider", "default_llm_provider TEXT NOT NULL DEFAULT 'anthropic'");

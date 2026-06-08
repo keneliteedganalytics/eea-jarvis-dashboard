@@ -11,12 +11,17 @@ export interface TierChange {
   reason: string;
 }
 
+// Which booth voice spoke this reply (PR #22). "scarlett" = informational,
+// "jarvis" = tier-change action.
+export type VoiceName = "scarlett" | "jarvis";
+
 export interface ProcessResult {
   conversationId: number;
   spokenResponse: string;
   proposedChanges: TierChange[];
   needsConfirmation: boolean;
   contextSummary: string | null;
+  voice: VoiceName;
   audioUrl: string | null;
 }
 
@@ -28,6 +33,7 @@ export interface VoiceExchange {
   jarvisResponse: string;
   proposedChanges?: TierChange[];
   needsConfirmation?: boolean;
+  voice?: VoiceName;
   status?: "pending" | "applied" | "discarded";
 }
 

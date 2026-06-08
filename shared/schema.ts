@@ -119,8 +119,12 @@ export const settings = sqliteTable("settings", {
   reconWin: real("recon_win").notNull().default(20),
   dualWin: real("dual_win").notNull().default(30),
   defaultTrack: text("default_track").notNull().default("Saratoga"),
-  // Jarvis voice (v2)
+  // Jarvis voice (v2) — Brian. Used for tier-change actions/confirmations.
   elevenlabsVoiceId: text("elevenlabs_voice_id").notNull().default("onwK4e9ZLuTAKqWW03F9"),
+  // Scarlett voice (PR #22) — Sarah. Used for informational/question replies.
+  elevenlabsVoiceIdScarlett: text("elevenlabs_voice_id_scarlett")
+    .notNull()
+    .default("EXAVITQu4vr4xnSDxMaL"),
   elevenlabsModelId: text("elevenlabs_model_id").notNull().default("eleven_turbo_v2_5"),
   voiceSpeed: real("voice_speed").notNull().default(1.0),
   autoRecapEnabled: integer("auto_recap_enabled", { mode: "boolean" }).notNull().default(true),

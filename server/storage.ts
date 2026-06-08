@@ -89,6 +89,7 @@ export interface IStorage {
   // Settings
   getSettings(): Settings;
   updateSettings(patch: Partial<Settings>): Settings;
+  seedVoiceSettings(): void;
 
   // Audio cache
   getAudio(scriptHash: string): AudioCache | undefined;
@@ -507,6 +508,22 @@ export class DatabaseStorage implements IStorage {
     const current = this.getSettings();
     db.update(settings).set(patch).where(eq(settings.id, current.id)).run();
     return this.getSettings();
+  }
+
+  // PR #22: idempotently seed the two voice ids from env on boot. Only writes a
+  // value the operator explicitly provided via env (ELEVENLABS_VOICE_JARVIS /
+  // ELEVENLABS_VOICE_SCARLETT); otherwise the existing stored value (or the
+  // column default) stands. Safe to call every boot.
+  seedVoiceSettings(): void {
+    const s = this.getSettings();
+    const patch: Partial<Settings> = {};
+    const jarvis = process.env.ELEVENLABS_VOICE_JARVIS;
+    const scarlett = process.env.ELEVENLABS_VOICE_SCARLETT;
+    if (jarvis && jarvis !== s.elevenlabsVoiceId) patch.elevenlabsVoiceId = jarvis;
+    if (scarlett && scarlett !== s.elevenlabsVoiceIdScarlett) {
+      patch.elevenlabsVoiceIdScarlett = scarlett;
+    }
+    if (Object.keys(patch).length) this.updateSettings(patch);
   }
 
   // ── Audio cache ─────────────────────────────────────────────────────────

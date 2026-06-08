@@ -12,7 +12,7 @@ import {
   Check,
   Undo2,
 } from "lucide-react";
-import type { VoiceStatus } from "@/lib/voice/types";
+import type { VoiceName, VoiceStatus } from "@/lib/voice/types";
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
   idle: "Standby",
@@ -37,6 +37,22 @@ function StatusDot({ status }: { status: VoiceStatus }) {
           active ? "bg-gold" : busy ? "bg-gold-light" : "bg-muted-brand/50",
         )}
       />
+    </span>
+  );
+}
+
+// Small per-reply label so Ken can tell which booth voice answered.
+function VoiceLabel({ voice }: { voice: VoiceName }) {
+  const isJarvis = voice === "jarvis";
+  return (
+    <span
+      data-testid={`voice-label-${voice}`}
+      className={cn(
+        "rounded-sm px-1.5 py-px text-[9px] font-display font-bold uppercase tracking-[0.18em]",
+        isJarvis ? "bg-gold/15 text-gold-dark" : "bg-silver/10 text-silver/80",
+      )}
+    >
+      {isJarvis ? "Jarvis" : "Scarlett"}
     </span>
   );
 }
@@ -191,7 +207,8 @@ function ConversationPanel() {
                   {x.userTranscript}
                 </div>
               </div>
-              <div className="flex justify-start">
+              <div className="flex flex-col items-start gap-0.5">
+                <VoiceLabel voice={x.voice ?? "jarvis"} />
                 <div className="max-w-[90%] rounded-lg rounded-tl-sm border border-gold/15 bg-gold/[0.06] px-3 py-1.5 text-xs text-silver">
                   {x.jarvisResponse}
                 </div>
