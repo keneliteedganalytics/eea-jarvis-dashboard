@@ -4,6 +4,7 @@ import path from "node:path";
 import { db } from "../db";
 import { audioCache } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { getDictionaryLocator, injectSsmlPhonemes } from "./pronunciation";
 
 // Resolve a stable on-disk cache directory. In dev (tsx/ESM) and prod (esbuild
 // CJS bundle) we anchor to the project working directory so the path is stable.
@@ -210,7 +211,18 @@ export async function generateSpeech(
   speed = 1.0,
 ): Promise<SpeechResult> {
   const speakable = sanitizeForTTS(text);
-  const scriptHash = hashScript(voiceId, modelId, `${speakable}::${speed}`);
+
+  // Pronunciation overrides (track names, racing terms, surnames). Preferred:
+  // an uploaded ElevenLabs dictionary attached via locator (no text change).
+  // Fallback: inject SSML <phoneme> tags into the text for this single call.
+  // Degrades to a plain pass-through if the dictionary is missing/unreachable.
+  const locator = await getDictionaryLocator();
+  const finalText = locator ? speakable : injectSsmlPhonemes(speakable);
+
+  // Cache key includes the locator id (or "ssml"/"none") so swapping the
+  // pronunciation mechanism never serves stale audio for the same script.
+  const dictTag = locator ? locator.pronunciation_dictionary_id : finalText === speakable ? "none" : "ssml";
+  const scriptHash = hashScript(voiceId, modelId, `${finalText}::${speed}::${dictTag}`);
 
   // Cache lookup
   const existing = db.select().from(audioCache).where(eq(audioCache.scriptHash, scriptHash)).get();
@@ -222,10 +234,13 @@ export async function generateSpeech(
   if (!apiKey) throw new Error("ELEVENLABS_API_KEY not set");
 
   const body: Record<string, unknown> = {
-    text: speakable,
+    text: finalText,
     model_id: modelId,
     voice_settings: { ...VOICE_SPEED_SETTINGS, speed },
   };
+  if (locator) {
+    body.pronunciation_dictionary_locators = [locator];
+  }
 
   const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
     method: "POST",
@@ -248,7 +263,7 @@ export async function generateSpeech(
 
   // Upsert into cache
   db.delete(audioCache).where(eq(audioCache.scriptHash, scriptHash)).run();
-  db.insert(audioCache).values({ scriptHash, voiceId, modelId, text: speakable, filePath }).run();
+  db.insert(audioCache).values({ scriptHash, voiceId, modelId, text: finalText, filePath }).run();
 
   return { audioUrl: `/audio/${scriptHash}`, cached: false };
 }

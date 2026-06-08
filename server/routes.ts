@@ -1,10 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
-import { randomUUID } from "node:crypto";
-import path from "node:path";
-import fs from "node:fs";
-import multer from "multer";
 import { storage, seedSaratogaCard, seedFormulaVersion } from "./storage";
 import {
   insertCardSchema,
@@ -16,11 +12,17 @@ import {
 } from "@shared/schema";
 import type { Card, Settings } from "@shared/schema";
 import { z } from "zod";
-import { analyzeCard } from "./services/analyze-card";
 import { backfillNullScoreCards, sweepArchive } from "./services/card-finishing";
 import { getOrFetchBias, fetchBias } from "./services/bias-fetcher";
 import { getOrGenerateRaceSummary } from "./services/race-summary";
-import { buildAnalyticsSummary, buildCardStats, buildLifetimeStats } from "./analytics";
+import {
+  buildAnalyticsSummary,
+  buildCardStats,
+  buildLifetimeStats,
+  buildTrackRecordSummary,
+  TIMEFRAMES,
+  type Timeframe,
+} from "./analytics";
 import {
   cardBriefingScript,
   raceBriefingScript,
@@ -169,61 +171,9 @@ export async function registerRoutes(
     }
   });
 
-  // ── EEA: Upload + analyze a card ──────────────────────────────────────────
-  // On Railway, set UPLOAD_DIR to a path on the persistent volume
-  // (e.g. /data/uploads). Falls back to ./uploads for local dev.
-  const uploadDir = process.env.UPLOAD_DIR
-    ? path.resolve(process.env.UPLOAD_DIR)
-    : path.resolve(process.cwd(), "uploads");
-  fs.mkdirSync(uploadDir, { recursive: true });
-  const upload = multer({
-    storage: multer.diskStorage({
-      destination: (_req, _file, cb) => cb(null, uploadDir),
-      filename: (_req, file, cb) =>
-        cb(null, `${randomUUID()}-${file.originalname.replace(/[^\w.\-]/g, "_")}`),
-    }),
-    limits: { fileSize: 64 * 1024 * 1024 },
-  });
-
-  // multipart: brisnetPdf, equibasePdf, track, date, provider?
-  app.post(
-    "/api/upload-pps",
-    upload.fields([
-      { name: "brisnetPdf", maxCount: 1 },
-      { name: "equibasePdf", maxCount: 1 },
-    ]),
-    async (req, res) => {
-      const files = req.files as Record<string, Express.Multer.File[]> | undefined;
-      const bris = files?.brisnetPdf?.[0];
-      const equi = files?.equibasePdf?.[0];
-      const track = String(req.body.track || "").trim();
-      const date = String(req.body.date || "").trim();
-      const provider =
-        req.body.provider === "poe" || req.body.provider === "anthropic"
-          ? (req.body.provider as "poe" | "anthropic")
-          : undefined;
-      if (!bris || !equi) {
-        return res.status(400).json({ error: "Both brisnetPdf and equibasePdf are required" });
-      }
-      if (!track || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-        return res.status(400).json({ error: "track and date (YYYY-MM-DD) are required" });
-      }
-      try {
-        const result = await analyzeCard({
-          track,
-          date,
-          brisnetPath: bris.path,
-          equibasePath: equi.path,
-          brisnetFilename: bris.originalname,
-          equibaseFilename: equi.originalname,
-          provider,
-        });
-        res.status(201).json(result);
-      } catch (e) {
-        res.status(500).json({ error: (e as Error).message });
-      }
-    },
-  );
+  // Manual PP upload (POST /api/upload-pps) was removed. Card ingest is now
+  // fully driven by the Equibase + Brisnet auto-ingest cron; the underlying
+  // analyzeCard() pipeline is retained for that path.
 
   // Review payload: card + races + per-race predictions for the confirm screen.
   app.get("/api/cards/:id/review", (req, res) => {
@@ -379,6 +329,16 @@ export async function registerRoutes(
   // Lifetime scorecard — aggregates across ALL cards (active + archived).
   app.get("/api/stats/lifetime", (_req, res) => {
     res.json(buildLifetimeStats());
+  });
+
+  // Track-record hero summary — overall record + flat-bet ROI + units + per-tier
+  // breakdown for a timeframe (7D/30D/90D/YTD/ALL, default 30D). Same analytics
+  // source as the public /track-record page; this one is auth-gated and adds
+  // ROI/units/tier detail.
+  app.get("/api/track-record/summary", (req, res) => {
+    const raw = String(req.query.timeframe || "30D").toUpperCase();
+    const tf: Timeframe = (TIMEFRAMES as string[]).includes(raw) ? (raw as Timeframe) : "30D";
+    res.json(buildTrackRecordSummary(tf));
   });
 
   // ── Public track record (NO AUTH) ─────────────────────────────────────────

@@ -253,6 +253,89 @@ export function buildLifetimeStats(): LifetimeStats {
   return { totals, byTrack };
 }
 
+// ── Track-record hero summary ───────────────────────────────────────────────
+// Units model (flat bet): every graded win-pick is a 1-unit win bet.
+//   - win  → profit = (winPayout / 2) - 1   [payouts are quoted on a $2 base]
+//            (falls back to +1.5u when the payout wasn't captured)
+//   - loss → -1u
+// ROI = net units / plays — a flat-bet ROI, intentionally simpler than the
+// bankroll-weighted curve in buildAnalyticsSummary().
+export type Timeframe = "7D" | "30D" | "90D" | "YTD" | "ALL";
+export const TIMEFRAMES: Timeframe[] = ["7D", "30D", "90D", "YTD", "ALL"];
+
+export interface TierRecord {
+  tier: string;
+  wins: number;
+  plays: number;
+  units: number;
+}
+export interface TrackRecordSummary {
+  timeframe: Timeframe;
+  wins: number;
+  plays: number;
+  winPct: number | null;
+  units: number;
+  roi: number | null;
+  tiers: TierRecord[];
+  generatedAt: string;
+}
+
+function timeframeCutoff(tf: Timeframe, now = new Date()): string | null {
+  if (tf === "ALL") return null;
+  if (tf === "YTD") return `${now.getUTCFullYear()}-01-01`;
+  const days = tf === "7D" ? 7 : tf === "30D" ? 30 : 90;
+  const d = new Date(now);
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+function unitsForRace(r: RaceWithResult): number {
+  if (!r.result) return 0;
+  if (r.result.winHit) {
+    const wp = r.result.winPayout;
+    return wp && wp > 0 ? wp / 2 - 1 : 1.5;
+  }
+  return -1;
+}
+
+export function buildTrackRecordSummary(timeframe: Timeframe = "30D"): TrackRecordSummary {
+  const cutoff = timeframeCutoff(timeframe);
+  const cards = storage
+    .getCards()
+    .filter((c) => (cutoff ? c.date >= cutoff : true))
+    .map((c) => storage.getCardWithRaces(c.id))
+    .filter((c): c is CardWithRaces => !!c);
+
+  const graded = cards.flatMap((c) => c.races).filter((r) => r.result);
+
+  const plays = graded.length;
+  const wins = graded.filter((r) => r.result?.winHit).length;
+  const units = graded.reduce((a, r) => a + unitsForRace(r), 0);
+  const winPct = plays > 0 ? Math.round((wins / plays) * 100) : null;
+  const roi = plays > 0 ? Math.round((units / plays) * 1000) / 10 : null; // 1dp %
+
+  const tiers: TierRecord[] = ["SNIPER", "EDGE", "DUAL"].map((tier) => {
+    const rs = graded.filter((r) => r.tier === tier);
+    return {
+      tier,
+      wins: rs.filter((r) => r.result?.winHit).length,
+      plays: rs.length,
+      units: Math.round(rs.reduce((a, r) => a + unitsForRace(r), 0) * 10) / 10,
+    };
+  });
+
+  return {
+    timeframe,
+    wins,
+    plays,
+    winPct,
+    units: Math.round(units * 10) / 10,
+    roi,
+    tiers,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
 export function buildCardStats(card: CardWithRaces) {
   const graded = card.races.filter((r) => r.result);
   const winsHit = graded.filter((r) => r.result?.winHit).length;
