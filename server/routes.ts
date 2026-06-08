@@ -37,6 +37,8 @@ import { showApiRouter, showFileRouter } from "./routes/show";
 import { equibaseAdminRouter } from "./routes/equibase";
 import { startEquibaseIngestCron } from "./services/equibase-cron";
 import { startWeatherCron } from "./services/weather-cron";
+import { startScratchRefreshCron } from "./services/scratch-refresh-cron";
+import { refreshScratchesForCard, isScratchRefreshError } from "./services/scratch-refresh";
 import { brisnetAdminRouter } from "./routes/brisnet";
 
 // Helper: load TTS settings (voice / model / speed) from storage.
@@ -70,6 +72,9 @@ export async function registerRoutes(
   // 30-min weather refresh for today + tomorrow's races (PR #18). Runs in all
   // envs — it only reads OpenWeather and never mutates picks.
   startWeatherCron();
+  // 15-min scratch refresh for locked cards during racing hours (PR #20). Reads
+  // each card's stored source roster and flags missing horses as scratched.
+  startScratchRefreshCron();
 
   // ── Cards ────────────────────────────────────────────────────────────────
   // Default to active cards only so the main dashboard never shows past cards.
@@ -201,6 +206,19 @@ export async function registerRoutes(
     const updated = storage.updatePrediction(id, parsed.data);
     if (!updated) return res.status(404).json({ error: "Prediction not found" });
     res.json(updated);
+  });
+
+  // Refresh scratches: re-diff a locked card's roster against its stored source
+  // and flag missing horses scratched (idempotent; supports reinstatement). The
+  // 15-min cron calls the same function automatically; this is the manual hook.
+  app.post("/api/cards/:id/refresh-scratches", (req, res) => {
+    const id = Number(req.params.id);
+    if (!storage.getCard(id)) return res.status(404).json({ error: "Card not found" });
+    const result = refreshScratchesForCard(id);
+    if (isScratchRefreshError(result)) {
+      return res.status(409).json(result);
+    }
+    res.json(result);
   });
 
   // Publish: mark the card live (locked = true) so the dashboard + poller act on it.

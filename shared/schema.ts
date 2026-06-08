@@ -201,6 +201,11 @@ export const predictions = sqliteTable("predictions", {
   // PR #16 Phase 2: per-horse bloodstock adjustment (applied/composite/
   // confidence/reasonCodes/ratingDelta) as JSON, parallel to the weather factor.
   bloodstockJson: text("bloodstock_json"),
+  // PR #20: per-horse scratch flag. Set by the scratch-refresh diff when a horse
+  // is no longer in the source roster; cleared on re-instatement. Scratched
+  // horses keep their row (and analysis history) but are excluded from ranking.
+  scratched: integer("scratched", { mode: "boolean" }).notNull().default(false),
+  scratchedAt: text("scratched_at"), // ISO 8601, set when the scratch was detected
   llmProvider: text("llm_provider", { enum: ["anthropic", "poe"] }),
   llmModel: text("llm_model"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),

@@ -107,6 +107,8 @@ CREATE TABLE IF NOT EXISTS predictions (
   figure_weights_json TEXT,
   bias_context_json TEXT,
   bloodstock_json TEXT,
+  scratched INTEGER NOT NULL DEFAULT 0,
+  scratched_at TEXT,
   llm_provider TEXT,
   llm_model TEXT,
   created_at INTEGER NOT NULL
@@ -369,6 +371,16 @@ const predictionsCols = new Set(
 );
 if (!predictionsCols.has("bloodstock_json")) {
   sqlite.exec("ALTER TABLE predictions ADD COLUMN bloodstock_json TEXT");
+}
+
+// Idempotent predictions-column migration for PR #20: per-horse scratch flag +
+// detection timestamp. Existing rows default to not-scratched. Set/cleared by
+// the scratch-refresh diff; rows are never deleted so history is preserved.
+if (!predictionsCols.has("scratched")) {
+  sqlite.exec("ALTER TABLE predictions ADD COLUMN scratched INTEGER NOT NULL DEFAULT 0");
+}
+if (!predictionsCols.has("scratched_at")) {
+  sqlite.exec("ALTER TABLE predictions ADD COLUMN scratched_at TEXT");
 }
 
 export const db = drizzle(sqlite);
