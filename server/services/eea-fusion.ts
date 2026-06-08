@@ -17,6 +17,10 @@ import type {
   EquibaseHorse,
   RaceConditions,
 } from "./parsers/types";
+import {
+  computeBloodstockFitness,
+  type BloodstockConfidence,
+} from "../bloodstock";
 
 export type RaceType = "stakes_graded" | "allowance" | "claimer" | "msw";
 export type Tier = "SNIPER" | "EDGE" | "DUAL" | "RECON" | "PASS";
@@ -27,6 +31,17 @@ export interface BiasContext {
   runStyleBias?: "speed" | "closer" | "neutral" | null;
   railBias?: "good" | "bad" | "neutral" | null;
   note?: string | null;
+}
+
+// Per-horse bloodstock adjustment exposed on the analysis output, parallel to
+// WeatherAdjustment. applied=false whenever confidence is "none" (or no data).
+export interface BloodstockAdjustment {
+  applied: boolean;
+  composite: number;
+  reasonCodes: string[];
+  confidence: BloodstockConfidence;
+  // Signed EEA-Rating points the bloodstock factor moved this horse by.
+  ratingDelta: number;
 }
 
 export interface FusedHorse {
@@ -43,6 +58,7 @@ export interface FusedHorse {
   mlOdds: number | null;
   rank: number;
   flags: string[];
+  bloodstockAdjustment: BloodstockAdjustment;
 }
 
 // Parse a morning-line string ("6-1", "9-2", "7/2", "5", "EVN") into a decimal
@@ -281,6 +297,7 @@ export function fuseRace(
   const isTurf = (conditions.surface || "").toUpperCase().includes("TURF");
   const sev = wetTrack ? weights.weather.severity[surface as "wet" | "sloppy" | "muddy"] : 0;
   const weatherReasons = new Set<string>();
+  const bw = weights.bloodstock;
 
   const horses: FusedHorse[] = interim.map((h) => {
     const loneSpeed = h.pgm === loneSpeedPgm;
@@ -324,6 +341,71 @@ export function fuseRace(
       }
     }
 
+    // ── Bloodstock factor (PR #16 Phase 2) ────────────────────────────────
+    // Compute fitness from the horse's pedigree names; apply ONLY when the
+    // factor has real confidence. Stacks on top of (does not replace) the wet
+    // adjustments above. Two modes:
+    //   • Normal: a capped ±maxBiasPoints nudge centered on composite vs 50.
+    //   • First-timer (<3 starts AND confidence ≥ medium): lean hard, treating
+    //     the composite as firstTimerRatingWeight of the rating.
+    const fitness = computeBloodstockFitness(
+      {
+        sireName: h.b?.sire?.name ?? null,
+        damName: h.b?.dam?.name ?? null,
+        damSireName: h.b?.damSire?.name ?? null,
+        lifetimeStarts: h.b?.lifetimeStarts ?? null,
+      },
+      { conditions, surfaceWet: wetTrack },
+      bw,
+    );
+    let bloodstockDelta = 0;
+    const bloodstockApplied = fitness.confidence !== "none" && baseRating != null;
+    if (bloodstockApplied && baseRating != null) {
+      const centered = (fitness.composite - 50) / 50; // -1..+1
+      const starts = h.b?.lifetimeStarts ?? null;
+      const firstTimer =
+        starts != null &&
+        starts < bw.firstTimerStartsCutoff &&
+        (fitness.confidence === "high" || fitness.confidence === "medium");
+
+      if (firstTimer) {
+        // Blend the rating toward the composite (mapped onto the rating's scale)
+        // at firstTimerRatingWeight. Pedigree leads for unraced horses.
+        const target = baseRating * (1 - bw.firstTimerRatingWeight) +
+          (baseRating * (1 + centered * 0.5)) * bw.firstTimerRatingWeight;
+        bloodstockDelta = target - baseRating;
+        flags.push("first-timer-pedigree-lean");
+      } else {
+        bloodstockDelta = centered * bw.maxBiasPoints;
+      }
+
+      // Wet interaction: on an off track, amplify a strong wet pedigree and
+      // penalize a weak one — stacking with the weather block, not replacing it.
+      if (wetTrack) {
+        if (fitness.wetFit >= bw.wetStrongComposite && bloodstockDelta > 0) {
+          bloodstockDelta *= bw.wetBoostMultiplier;
+          flags.push("wet-pedigree-boost");
+        } else if (fitness.wetFit <= bw.wetWeakComposite) {
+          bloodstockDelta -= bw.wetPenaltyMax * sev;
+          flags.push("wet-pedigree-penalty");
+        }
+      }
+
+      // Hard cap normal-mode bias at ±maxBiasPoints; first-timer mode is allowed
+      // its larger swing but still bounded to keep the base rating dominant.
+      const cap = firstTimer ? bw.maxBiasPoints * 4 : bw.maxBiasPoints * bw.wetBoostMultiplier;
+      bloodstockDelta = Math.max(-cap, Math.min(cap, bloodstockDelta));
+      baseRating += bloodstockDelta;
+    }
+
+    const bloodstockAdjustment: BloodstockAdjustment = {
+      applied: bloodstockApplied,
+      composite: fitness.composite,
+      reasonCodes: fitness.reasonCodes,
+      confidence: fitness.confidence,
+      ratingDelta: Math.round(bloodstockDelta * 10) / 10,
+    };
+
     const eeaRating = baseRating != null ? Math.round(baseRating * 10) / 10 : null;
 
     return {
@@ -338,6 +420,7 @@ export function fuseRace(
       mlOdds: h.mlOdds,
       rank: 0,
       flags,
+      bloodstockAdjustment,
     };
   });
 

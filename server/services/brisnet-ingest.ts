@@ -287,8 +287,9 @@ export function persistCard(card: DrmCard, raceDate: Date): number {
        (race_date, track_code, race_number, program_number, run_style,
         prime_power, best_speed, best_speed_surf_a, best_speed_surf_b,
         speed_par_early, speed_par_late, pace_par_e1, pace_par_e2,
-        ml_odds, company_line, raw_row, ingested_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ml_odds, company_line, horse_name, sire_name, dam_name, dam_sire_name,
+        pedigree_stats, raw_row, ingested_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (race_date, track_code, race_number, program_number)
      DO UPDATE SET
        run_style=excluded.run_style,
@@ -302,6 +303,11 @@ export function persistCard(card: DrmCard, raceDate: Date): number {
        pace_par_e2=excluded.pace_par_e2,
        ml_odds=excluded.ml_odds,
        company_line=excluded.company_line,
+       horse_name=excluded.horse_name,
+       sire_name=excluded.sire_name,
+       dam_name=excluded.dam_name,
+       dam_sire_name=excluded.dam_sire_name,
+       pedigree_stats=excluded.pedigree_stats,
        raw_row=excluded.raw_row,
        ingested_at=excluded.ingested_at`,
   );
@@ -325,6 +331,11 @@ export function persistCard(card: DrmCard, raceDate: Date): number {
           race.paceParE2,
           h.mlOdds,
           h.companyLine,
+          h.horseName,
+          h.sireName,
+          h.damName,
+          h.damSireName,
+          JSON.stringify(h.pedigreeStats),
           JSON.stringify(h.rawRow),
           ingestedAt,
         );
@@ -334,6 +345,49 @@ export function persistCard(card: DrmCard, raceDate: Date): number {
   });
   tx();
   return count;
+}
+
+// ── Bloodstock read path (Phase 2) ───────────────────────────────────────────
+// The pedigree the bloodstock factor needs, keyed by race number + program
+// number, for one card (race_date + track_code). Returns an empty map when the
+// DRM card was never ingested, so the engine simply runs without the factor.
+export interface DrmPedigree {
+  sireName: string | null;
+  damName: string | null;
+  damSireName: string | null;
+}
+
+export function getBloodstockForCard(
+  isoDate: string,
+  trackCode: string,
+): Map<string, DrmPedigree> {
+  const key = (raceNumber: number, pgm: string) => `${raceNumber}|${pgm}`;
+  const out = new Map<string, DrmPedigree>();
+  try {
+    const rows = sqlite
+      .prepare(
+        `SELECT race_number, program_number, sire_name, dam_name, dam_sire_name
+           FROM brisnet_horse_data
+          WHERE race_date = ? AND track_code = ?`,
+      )
+      .all(isoDate, trackCode.trim().toUpperCase()) as {
+      race_number: number;
+      program_number: string;
+      sire_name: string | null;
+      dam_name: string | null;
+      dam_sire_name: string | null;
+    }[];
+    for (const r of rows) {
+      out.set(key(r.race_number, String(r.program_number)), {
+        sireName: r.sire_name,
+        damName: r.dam_name,
+        damSireName: r.dam_sire_name,
+      });
+    }
+  } catch {
+    /* table/columns may not exist on a fresh install — degrade silently */
+  }
+  return out;
 }
 
 // ── Telemetry ────────────────────────────────────────────────────────────────

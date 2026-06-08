@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS predictions (
   persona_version INTEGER,
   figure_weights_json TEXT,
   bias_context_json TEXT,
+  bloodstock_json TEXT,
   llm_provider TEXT,
   llm_model TEXT,
   created_at INTEGER NOT NULL
@@ -259,6 +260,11 @@ CREATE TABLE IF NOT EXISTS brisnet_horse_data (
   pace_par_e2 REAL,
   ml_odds REAL,
   company_line TEXT,
+  horse_name TEXT,
+  sire_name TEXT,
+  dam_name TEXT,
+  dam_sire_name TEXT,
+  pedigree_stats TEXT,
   raw_row TEXT NOT NULL,
   ingested_at TEXT NOT NULL,
   UNIQUE (race_date, track_code, race_number, program_number)
@@ -331,6 +337,38 @@ if (!racesCols.has("tier_demoted_by")) {
 // sorting/comparison. races.post stays the track-local display string.
 if (!racesCols.has("post_time_utc")) {
   sqlite.exec("ALTER TABLE races ADD COLUMN post_time_utc TEXT");
+}
+
+// Idempotent brisnet_horse_data migration for PR #16 Phase 2: persist the
+// bloodstock names + the raw pedigree-stat block extracted by the DRM parser.
+// Matches the column-existence-check pattern used above. sire/dam/dam-sire are
+// the reliably-anchored fields the bloodstock scorer keys off; pedigree_stats
+// keeps the untyped DR2 165..188 block verbatim for future re-decode.
+const brisnetHorseCols = new Set(
+  (sqlite.prepare("PRAGMA table_info(brisnet_horse_data)").all() as { name: string }[]).map(
+    (c) => c.name,
+  ),
+);
+const addBrisnetHorseCol = (name: string, ddl: string) => {
+  if (!brisnetHorseCols.has(name))
+    sqlite.exec(`ALTER TABLE brisnet_horse_data ADD COLUMN ${ddl}`);
+};
+addBrisnetHorseCol("horse_name", "horse_name TEXT");
+addBrisnetHorseCol("sire_name", "sire_name TEXT");
+addBrisnetHorseCol("dam_name", "dam_name TEXT");
+addBrisnetHorseCol("dam_sire_name", "dam_sire_name TEXT");
+addBrisnetHorseCol("pedigree_stats", "pedigree_stats TEXT"); // JSON int array
+
+// Idempotent predictions-column migration for PR #16 Phase 2: persist the
+// per-horse bloodstock adjustment (applied/composite/confidence/reasonCodes)
+// parallel to how the weather factor rides along. JSON blob, nullable.
+const predictionsCols = new Set(
+  (sqlite.prepare("PRAGMA table_info(predictions)").all() as { name: string }[]).map(
+    (c) => c.name,
+  ),
+);
+if (!predictionsCols.has("bloodstock_json")) {
+  sqlite.exec("ALTER TABLE predictions ADD COLUMN bloodstock_json TEXT");
 }
 
 export const db = drizzle(sqlite);
