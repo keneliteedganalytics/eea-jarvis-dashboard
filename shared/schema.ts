@@ -85,6 +85,28 @@ export const results = sqliteTable("results", {
   loggedAt: text("logged_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+// ── Weather per race (PR #18) ─────────────────────────────────────────────
+// One row per race_id, persisted for backtesting. surfaceImpact is the derived
+// handicapping signal; "unknown" means OpenWeather was unreachable and the
+// engine must NOT alter any pick. fetchedAt lets the scheduler/cache age rows.
+export const raceWeather = sqliteTable("race_weather", {
+  raceId: integer("race_id").primaryKey(),
+  tempF: real("temp_f"),
+  feelsLikeF: real("feels_like_f"),
+  conditions: text("conditions"),
+  precipMm: real("precip_mm"),
+  windMph: real("wind_mph"),
+  windDirDeg: real("wind_dir_deg"),
+  humidityPct: real("humidity_pct"),
+  surfaceImpact: text("surface_impact", {
+    enum: ["dry", "damp", "wet", "sloppy", "muddy", "unknown"],
+  })
+    .notNull()
+    .default("unknown"),
+  source: text("source").notNull().default("openweather"),
+  fetchedAt: text("fetched_at").notNull(),
+});
+
 // ── User settings (single row) ────────────────────────────────────────────
 export const settings = sqliteTable("settings", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -349,9 +371,30 @@ export interface RaceWagers {
   legs: RaceWagerLeg[];
 }
 
+// ── Weather (PR #18) ───────────────────────────────────────────────────────
+export type SurfaceImpact = "dry" | "damp" | "wet" | "sloppy" | "muddy" | "unknown";
+
+// The typed forecast the weather service returns and the API attaches to each
+// race. Numeric fields are null when surfaceImpact is "unknown" (fetch failed).
+export interface RaceWeather {
+  tempF: number | null;
+  feelsLikeF: number | null;
+  conditions: string | null;
+  precipMm: number | null;
+  windMph: number | null;
+  windDirDeg: number | null;
+  humidityPct: number | null;
+  surfaceImpact: SurfaceImpact;
+  fetchedAt: string; // ISO 8601 UTC
+  source: "openweather";
+}
+
+export type RaceWeatherRow = typeof raceWeather.$inferSelect;
+
 export type RaceWithResult = Race & {
   result?: Result | null;
   bets?: RaceWagers;
+  weather?: RaceWeather | null;
 };
 export type CardWithRaces = Card & { races: RaceWithResult[] };
 

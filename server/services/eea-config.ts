@@ -50,6 +50,22 @@ export const DEFAULT_WEIGHTS = {
   dailyRiskCapPct: 0.03,
   // SNIPER gap requirement: EEA Rating must clear 2nd-best by this much.
   sniperGap: 4,
+  // Weather factor (PR #18). Applied ONLY when surfaceImpact ∈ {wet,sloppy,muddy}
+  // and we have real data — never on "unknown". All values are EEA-Rating points.
+  weather: {
+    // Per-point boost to a horse's rating, scaled by its wet-track win % (0-100)
+    // and the surface severity. mudderBoostMax is the cap at 100% wet win on the
+    // worst (muddy) surface.
+    mudderBoostMax: 4,
+    // Turf rained on: shave raw turf speed emphasis, since turf plays radically
+    // different wet. Applied as a rating penalty on the speed term for turf races.
+    turfSpeedPenalty: 3,
+    // Sloppy dirt flattens pace advantages: small boost to closers (low EEAP
+    // relative to field) and a small trim to pure speed types. Kept light.
+    closerBias: 1.5,
+    // Severity multipliers by surface (scales mudderBoost + closerBias).
+    severity: { wet: 0.5, sloppy: 0.8, muddy: 1.0 },
+  },
 };
 
 export type EeaWeights = typeof DEFAULT_WEIGHTS;

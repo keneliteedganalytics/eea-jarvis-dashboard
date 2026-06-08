@@ -31,6 +31,9 @@ export interface BrisnetHorse {
   classRating?: number | null;
   speedLast?: number | null;
   bestSpeedDist?: number | null;
+  // Wet-track win % (Brisnet "Wet(##)"). Optional — present only when the PP
+  // carries it. Used by the PR #18 weather factor to boost proven mudders.
+  wetWinPct?: number | null;
   pace: BrisnetPace;
   sire?: { name?: string; winPctOverall?: number | null } | null;
   dam?: { name?: string } | null;
@@ -69,6 +72,8 @@ export interface EquibaseHorse {
   speedLast?: number | null;
   speedAvg3?: number | null;
   speedHiLife?: number | null;
+  // Wet-track win % (Equibase off-track record). Optional. See BrisnetHorse.wetWinPct.
+  wetWinPct?: number | null;
   jockey?: string | null;
   trainer?: string | null;
   jockeyPct?: number | null;

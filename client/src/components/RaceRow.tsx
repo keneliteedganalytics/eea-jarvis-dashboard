@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import type { RaceWithResult } from "@shared/schema";
 import { TierPill } from "@/components/brand/TierPill";
+import { WeatherChip } from "@/components/WeatherChip";
 import { PickCell } from "@/components/PickCell";
 import { tierOf } from "@/lib/tiers";
 import { useJarvis } from "@/lib/jarvis";
@@ -64,6 +65,7 @@ export function RaceRow({ race, readOnly = false }: { race: RaceWithResult; read
           </div>
           <TierPill tier={race.tier} size="sm" />
           <div className="text-[10px] text-muted-brand tabular-nums">{race.post}</div>
+          <WeatherChip weather={race.weather} />
         </RaceLink>
 
         {/* Middle: conditions / shape / flags / read */}
