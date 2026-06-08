@@ -24,6 +24,7 @@ import { sqlite } from "../db";
 import type { BrisnetCard, EquibaseCard } from "./parsers/types";
 import { classifyRaceType, assignTier, type FusedRace, type Tier } from "./eea-fusion";
 import { DEFAULT_WEIGHTS, type EeaWeights } from "./eea-config";
+import { fetchOtbFingerLakes } from "./otb-finger-lakes";
 import type { Race } from "@shared/schema";
 
 // Active formula weights, falling back to the defaults (same resolution the
@@ -268,6 +269,50 @@ export function refreshScratchesForCard(cardId: number): ScratchRefreshResult {
   });
 
   return summary;
+}
+
+// OTB fallback (PR #23). When the native (Equibase/Brisnet) refresh finds no new
+// scratches for a Finger Lakes card, OTB's public page is sometimes fresher.
+// Pull it and scratch any roster horse OTB lists that we haven't already flagged.
+// Idempotent: a horse already scratched (by us or a prior OTB pass) is skipped,
+// matching the diff semantics of refreshScratchesForCard. Never throws — OTB is
+// a graceful fallback, so any failure resolves to 0 merged.
+export async function mergeOtbScratches(cardId: number): Promise<ScratchChange[]> {
+  const merged: ScratchChange[] = [];
+  try {
+    const card = storage.getCard(cardId);
+    if (!card || card.track !== "Finger Lakes") return merged;
+
+    const otb = await fetchOtbFingerLakes();
+    if (!otb || otb.scratches.length === 0) return merged;
+
+    const racesByNumber = new Map<number, Race>();
+    for (const r of storage.getRacesByCard(cardId)) racesByNumber.set(r.raceNumber, r);
+
+    const nowIso = new Date().toISOString();
+    const dirtyRaceIds = new Set<number>();
+    for (const s of otb.scratches) {
+      const race = racesByNumber.get(s.race);
+      if (!race) continue;
+      const pred = storage
+        .getPredictionsByRace(race.id)
+        .find((p) => p.horsePgm === s.program);
+      if (!pred || pred.scratched) continue; // not on our roster, or already scratched
+      storage.updatePrediction(pred.id, { scratched: true, scratchedAt: nowIso });
+      merged.push({ raceNumber: race.raceNumber, horsePgm: pred.horsePgm, horseName: pred.horseName });
+      dirtyRaceIds.add(race.id);
+    }
+
+    for (const raceId of Array.from(dirtyRaceIds)) recomputeTierIfNeeded(raceId);
+    if (dirtyRaceIds.size > 0) {
+      storage.updateCard(cardId, {
+        cardConviction: convictionFromTiers(storage.getRacesByCard(cardId)),
+      });
+    }
+  } catch (e) {
+    console.warn(`[scratch-refresh] OTB merge failed for card ${cardId}:`, (e as Error).message);
+  }
+  return merged;
 }
 
 // HIGH if any SNIPER (or 2+ EDGE), MEDIUM if any actionable tier, else LOW.

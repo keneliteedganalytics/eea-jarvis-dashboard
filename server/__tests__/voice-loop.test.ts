@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { CardWithRaces, RaceWithResult } from "@shared/schema";
-import { processVoiceTurn, type VoiceCardContext } from "../services/voice-persona";
+import {
+  processVoiceTurn,
+  VOICE_BOOTH_PERSONA,
+  NO_CLARIFYING_QUESTIONS_RULE,
+  type VoiceCardContext,
+} from "../services/voice-persona";
 
 vi.mock("../services/weather", () => ({
   getRaceWeather: vi.fn(async () => ({
@@ -89,6 +94,33 @@ function text(t: string) {
 function toolUse(id: string, name: string, input: unknown) {
   return { type: "tool_use", id, name, input };
 }
+
+describe("system prompt guardrail — never bounce a question back (PR #23)", () => {
+  it("embeds the no-clarifying-questions rule in the booth persona", () => {
+    expect(VOICE_BOOTH_PERSONA).toContain(NO_CLARIFYING_QUESTIONS_RULE);
+  });
+
+  it("the rule forbids the canonical clarifying phrasings", () => {
+    // Guardrail: if a future edit weakens the rule, these assertions catch it.
+    expect(NO_CLARIFYING_QUESTIONS_RULE).toMatch(/NEVER respond with a clarifying question/);
+    expect(NO_CLARIFYING_QUESTIONS_RULE).toMatch(/which track do you mean/i);
+    expect(NO_CLARIFYING_QUESTIONS_RULE).toMatch(/could you clarify/i);
+    expect(NO_CLARIFYING_QUESTIONS_RULE).toMatch(/most reasonable default/i);
+  });
+
+  it("uses the persona (containing the rule) as the system prompt on every turn", async () => {
+    const { client, create } = mockClient([
+      { content: [text("Latest card is Finger Lakes — three live plays.")], stop_reason: "end_turn" },
+    ]);
+    await processVoiceTurn("what's on the card?", CTX, [], {
+      client,
+      model: "claude-sonnet-4-5",
+    });
+    const arg = create.mock.calls[0][0] as any;
+    expect(arg.system).toBe(VOICE_BOOTH_PERSONA);
+    expect(arg.system).toContain("NEVER respond with a clarifying question");
+  });
+});
 
 describe("processVoiceTurn — tool loop + two-voice routing", () => {
   beforeEach(() => vi.clearAllMocks());
