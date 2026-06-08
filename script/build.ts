@@ -63,6 +63,12 @@ async function buildAll() {
   console.log("copying show keyframes...");
   await mkdir("dist/show-keyframes", { recursive: true });
   await cp("server/assets/show-keyframes", "dist/show-keyframes", { recursive: true });
+
+  // TTS pronunciation dictionary is read at runtime (server/services/pronunciation.ts)
+  // but the runtime image omits the server/ tree, so ship it under dist/data/.
+  console.log("copying pronunciation overrides...");
+  await mkdir("dist/data", { recursive: true });
+  await cp("server/data/pronunciation_overrides.json", "dist/data/pronunciation_overrides.json");
 }
 
 buildAll().catch((err) => {

@@ -10,8 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Mic, Lock, Check, RefreshCw, Printer } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { UploadCard } from "@/components/UploadCard";
 import { HostHero } from "@/components/brand/HostHero";
+import { TrackRecordHero } from "@/components/TrackRecordHero";
 
 function StatBox({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
   return (
@@ -79,9 +79,9 @@ export default function Home() {
   if (!card) {
     return (
       <div className="p-4 sm:p-6 max-w-[1100px] mx-auto pb-28">
-        <HostHero />
+        <TrackRecordHero />
         <div className="mt-4">
-          <UploadCard />
+          <HostHero />
         </div>
       </div>
     );
@@ -91,6 +91,9 @@ export default function Home() {
 
   return (
     <div className="p-4 sm:p-6 max-w-[1400px] mx-auto pb-28">
+      {/* Analytics-led hero — overall record + ROI + units, by timeframe */}
+      <TrackRecordHero className="mb-4" />
+
       {/* Hero strip */}
       <div className="rounded-xl border border-gold/15 bg-navy-card p-5 sm:p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -162,13 +165,13 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Legend + drop zone */}
-      <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_320px]">
+      {/* Legend */}
+      <div className="mt-4">
         <div className="rounded-lg border border-gold/10 bg-navy-section p-4">
           <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-3">
             Conviction Tier Legend
           </div>
-          <div className="grid sm:grid-cols-2 gap-2">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {LEGEND.map((l) => (
               <div key={l.tier} className="flex items-start gap-2">
                 <TierPill tier={l.tier} size="sm" />
@@ -177,7 +180,6 @@ export default function Home() {
             ))}
           </div>
         </div>
-        <UploadCard />
       </div>
 
       {/* Race rows */}

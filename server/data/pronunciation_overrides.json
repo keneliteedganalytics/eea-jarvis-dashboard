@@ -1,0 +1,39 @@
+{
+  "_meta": {
+    "description": "EEA Jarvis TTS pronunciation overrides. Drives both the ElevenLabs Pronunciation Dictionary (.pls) upload and the per-call SSML phoneme fallback. Extensible without redeploy: edit this file (or use `npx tsx script/seed_pronunciation_overrides.ts --add ...`) and re-run the seed script to refresh the uploaded dictionary. The running server also picks up file edits on its next TTS call (the loader is not cached across process restarts).",
+    "alphabet": "ipa",
+    "version": 2
+  },
+  "entries": [
+    { "grapheme": "Saratoga", "alphabet": "ipa", "phoneme": "ˌsɛrəˈtoʊɡə" },
+    { "grapheme": "Belmont", "alphabet": "ipa", "phoneme": "ˈbɛlmɑnt" },
+    { "grapheme": "Aqueduct", "alphabet": "ipa", "phoneme": "ˈækwɪdʌkt" },
+    { "grapheme": "Keeneland", "alphabet": "ipa", "phoneme": "ˈkiːnlənd" },
+    { "grapheme": "Pimlico", "alphabet": "ipa", "phoneme": "ˈpɪmlɪkoʊ" },
+    { "grapheme": "Gulfstream", "alphabet": "ipa", "phoneme": "ˈɡʌlfstriːm" },
+    { "grapheme": "Oaklawn", "alphabet": "ipa", "phoneme": "ˈoʊklɔːn" },
+    { "grapheme": "Parx", "alphabet": "ipa", "phoneme": "pɑːrks" },
+    { "grapheme": "Laurel", "alphabet": "ipa", "phoneme": "ˈlɔːrəl" },
+    { "grapheme": "allowance", "alphabet": "ipa", "phoneme": "əˈlaʊəns" },
+    { "grapheme": "claimer", "alphabet": "ipa", "phoneme": "ˈkleɪmər" },
+    { "grapheme": "maiden", "alphabet": "ipa", "phoneme": "ˈmeɪdən" },
+    { "grapheme": "furlongs", "alphabet": "ipa", "phoneme": "ˈfɜːrlɔːŋz" },
+    { "grapheme": "furlong", "alphabet": "ipa", "phoneme": "ˈfɜːrlɔːŋ" },
+    { "grapheme": "exacta", "alphabet": "ipa", "phoneme": "ɪɡˈzæktə" },
+    { "grapheme": "trifecta", "alphabet": "ipa", "phoneme": "traɪˈfɛktə" },
+    { "grapheme": "superfecta", "alphabet": "ipa", "phoneme": "ˌsuːpərˈfɛktə" },
+
+    { "grapheme": "Churchill Downs", "alias": "Churchill Downs" },
+    { "grapheme": "Finger Lakes", "alias": "Finger Lakes" },
+    { "grapheme": "Del Mar", "alias": "Dell Mar" },
+    { "grapheme": "Santa Anita", "alias": "Santa Aneeta" },
+    { "grapheme": "Tampa Bay Downs", "alias": "Tampa Bay Downs" },
+    { "grapheme": "optional claimer", "alias": "optional claimer" },
+    { "grapheme": "maiden special weight", "alias": "maiden special weight" },
+    { "grapheme": "off-the-turf", "alias": "off the turf" },
+    { "grapheme": "also-eligible", "alias": "also eligible" },
+    { "grapheme": "paddock", "alias": "paddock" },
+    { "grapheme": "post position", "alias": "post position" },
+    { "grapheme": "morning line", "alias": "morning line" }
+  ]
+}
