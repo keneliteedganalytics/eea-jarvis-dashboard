@@ -182,10 +182,26 @@ export const VOICE_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_analytics_summary",
     description:
-      "Performance analytics: graded races, average win%, bankroll-weighted ROI%, best tier, " +
-      "per-tier hit rates, flag accuracy, and race-type performance. Use for 'which tier is best', " +
-      "'what's our ROI', 'how does SNIPER do vs EDGE'.",
-    input_schema: { type: "object", properties: {}, additionalProperties: false },
+      "Performance analytics scoped to today, a specific track all-time, or lifetime. " +
+      "Returns graded races, average win%, ITM%, ROI%, best tier, per-tier hit rates, flag " +
+      "accuracy, and race-type performance. Use scope='today' for 'how are we doing today' / " +
+      "'what's our ROI today', scope='track' with a track name for 'how do we do at Saratoga', " +
+      "scope='lifetime' for 'what's our lifetime hit rate' or 'how do we do overall'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        scope: {
+          type: "string",
+          enum: ["today", "track", "lifetime"],
+          description: "today = today's racing only; track = one track all-time; lifetime = all tracks ever. Defaults to 'today'.",
+        },
+        track: {
+          type: "string",
+          description: "Track name when scope='track' (e.g. 'Finger Lakes', 'Saratoga'). Required only for scope=track.",
+        },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: "get_tier_performance",
@@ -616,9 +632,16 @@ export function getLifetimeStats(_input: unknown, _ctx: ToolContext): ToolResult
   }
 }
 
-export function getAnalyticsSummary(_input: unknown, _ctx: ToolContext): ToolResult {
+export function getAnalyticsSummary(
+  input: { scope?: "today" | "track" | "lifetime"; track?: string },
+  _ctx: ToolContext,
+): ToolResult {
   try {
-    return buildAnalyticsSummary() as unknown as Record<string, unknown>;
+    const scope = input.scope ?? "today";
+    if (scope === "track" && !input.track) {
+      return { error: "scope='track' requires a 'track' name (e.g. 'Saratoga'). Pick a track or use scope='today' or scope='lifetime' instead." };
+    }
+    return buildAnalyticsSummary({ scope, track: input.track }) as unknown as Record<string, unknown>;
   } catch (e) {
     return { error: `Analytics summary failed: ${(e as Error).message}` };
   }
@@ -965,7 +988,7 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
     case "get_lifetime_stats":
       return getLifetimeStats(i, ctx);
     case "get_analytics_summary":
-      return getAnalyticsSummary(i, ctx);
+      return getAnalyticsSummary(i as { scope?: "today" | "track" | "lifetime"; track?: string }, ctx);
     case "get_tier_performance":
       return getTierPerformance(i as { tier?: string }, ctx);
     case "get_track_record":
