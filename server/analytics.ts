@@ -98,7 +98,13 @@ export function buildAnalyticsSummary(opts: AnalyticsScope = {}) {
     cumulative += ret - stake;
     bankrollCurve.push({ label: `R${r.raceNumber}`, cumulative: Math.round(cumulative) });
   }
-  const roi = totalStaked > 0 ? Math.round(((totalReturn - totalStaked) / totalStaked) * 100) : 0;
+  // PR #45: the headline ROI now reads from the bet_legs ledger (same source as
+  // the bankroll pill and the Strategy ROI table) rather than the legacy
+  // wagerForTier reconstruction, which over/under-stated dollars (Card #9 showed
+  // +39.7% here while the bankroll ledger read +96%). Two sources of truth →
+  // one. The wagerForTier path is retained only for the relative bankroll curve.
+  const ledgerOverall = buildLedgerRoi(opts).overall;
+  const roi = ledgerOverall.roi ?? 0;
 
   // Flag accuracy
   const flagMap = new Map<string, { hit: number; total: number }>();

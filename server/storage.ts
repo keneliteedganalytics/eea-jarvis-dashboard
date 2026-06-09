@@ -65,7 +65,7 @@ import type {
 } from "@shared/schema";
 import type { PedigreeSummary } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, isNull, desc } from "drizzle-orm";
+import { eq, and, isNull, desc, inArray } from "drizzle-orm";
 import { gradeRace, gradeFlags } from "./grading";
 import { DEFAULT_WEIGHTS, PERSONA_V1 } from "./services/eea-config";
 import { buildWagers } from "./services/wagers";
@@ -563,7 +563,61 @@ export class DatabaseStorage implements IStorage {
     // Record the race's net on the card's bankroll ledger (PR #44). Idempotent
     // per (card, race) — a re-grade/payout backfill replaces the prior event.
     recordRaceGrade(race.cardId, raceId, `R${race.raceNumber} graded`);
+    // PR #45: detect a PASS-WIN MISS at grade time (don't wait for card
+    // completion) so the analytics tile lights up live during a card.
+    this.recordPassWinMissAtGrade(race, finishOrder);
     return row;
+  }
+
+  // PR #45 — grade-time PASS-WIN MISS. When a PASS race grades and the actual
+  // winner was on our board grid (we had a prediction for it), upsert that miss
+  // into card_summaries.pass_win_miss_horses immediately. Idempotent per race
+  // number: re-grading the same race won't duplicate the entry. Does NOT freeze
+  // the rest of the summary — only the PASS-WIN MISS columns are touched so a
+  // still-active card's row stays consistent.
+  private recordPassWinMissAtGrade(race: Race, finishOrder: string[]): void {
+    if (race.tier !== "PASS") return;
+    const winnerPgm = finishOrder[0];
+    if (!winnerPgm) return;
+    const winnerPred = this.getPredictionsByRace(race.id).find((p) => p.horsePgm === winnerPgm);
+    if (!winnerPred) return; // winner was off our board → not a miss
+
+    const miss: PassWinMissHorse = {
+      raceNumber: race.raceNumber,
+      horseNumber: winnerPgm,
+      name: winnerPred.horseName ?? null,
+      ourTier: winnerPred.tierAssigned ?? "PASS",
+      mlOdds: this.mlOddsForPrediction(winnerPred),
+    };
+
+    const existing = this.getCardSummary(race.cardId);
+    let horses: PassWinMissHorse[] = [];
+    if (existing) {
+      try {
+        const parsed = JSON.parse(existing.passWinMissHorses || "[]");
+        if (Array.isArray(parsed)) horses = parsed as PassWinMissHorse[];
+      } catch {
+        horses = [];
+      }
+    }
+    // Replace any prior entry for this race number so a re-grade updates in place.
+    horses = horses.filter((h) => h.raceNumber !== race.raceNumber);
+    horses.push(miss);
+    horses.sort((a, b) => a.raceNumber - b.raceNumber);
+
+    const patch = {
+      passWinMissCount: horses.length,
+      passWinMissHorses: JSON.stringify(horses),
+      computedAt: new Date().toISOString(),
+    };
+    if (existing) {
+      db.update(cardSummaries).set(patch).where(eq(cardSummaries.cardId, race.cardId)).run();
+    } else {
+      db.insert(cardSummaries)
+        .values({ cardId: race.cardId, ...patch })
+        .onConflictDoUpdate({ target: cardSummaries.cardId, set: patch })
+        .run();
+    }
   }
 
   // Backfill payouts (and/or win odds) onto an already-graded race without
@@ -624,6 +678,59 @@ export class DatabaseStorage implements IStorage {
   adjustCardBankroll(cardId: number, delta: number, note?: string): BankrollEventRow {
     seedCardBankroll(cardId);
     return appendBankrollEvent(cardId, null, "manual-adjust", delta, note);
+  }
+
+  // PR #45 — wipe phantom bankroll events and recompute the running balance from
+  // scratch. A "phantom" race-grade event is one whose race has no result row,
+  // or whose result has an empty finish order (Card #9 R4's −$167 event fired
+  // off an OTB stub before any R4 result existed). After deleting phantoms, the
+  // surviving events are replayed in (createdAt, id) order and each row's
+  // runningBalance is rewritten so the denormalized column is consistent.
+  // Returns the ids removed and the recomputed balance.
+  cleanupPhantomBankroll(cardId: number): { removed: number[]; balance: number } {
+    const events = db
+      .select()
+      .from(bankrollEvents)
+      .where(eq(bankrollEvents.cardId, cardId))
+      .all();
+
+    const removed: number[] = [];
+    for (const ev of events) {
+      if (ev.source !== "race-grade" || ev.raceId == null) continue;
+      const result = this.getResultByRace(ev.raceId);
+      const finish = result ? parseStringArrayField(result.finishOrder) : [];
+      // Phantom = race-grade event with no real graded result behind it.
+      if (!result || finish.length === 0) {
+        removed.push(ev.id);
+      }
+    }
+    if (removed.length > 0) {
+      db.delete(bankrollEvents)
+        .where(inArray(bankrollEvents.id, removed))
+        .run();
+    }
+
+    // Replay the survivors in chronological order, rewriting running balances.
+    const survivors = db
+      .select()
+      .from(bankrollEvents)
+      .where(eq(bankrollEvents.cardId, cardId))
+      .all()
+      .sort((a, b) => {
+        const ta = Date.parse(a.createdAt ?? "");
+        const tb = Date.parse(b.createdAt ?? "");
+        if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta - tb;
+        return a.id - b.id;
+      });
+    let running = 0;
+    for (const ev of survivors) {
+      running = Math.round((running + (ev.delta ?? 0)) * 100) / 100;
+      db.update(bankrollEvents)
+        .set({ runningBalance: running })
+        .where(eq(bankrollEvents.id, ev.id))
+        .run();
+    }
+    return { removed, balance: running };
   }
 
   // ── Bet ledger (PR #40) ───────────────────────────────────────────────────

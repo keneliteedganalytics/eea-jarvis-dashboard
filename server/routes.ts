@@ -254,6 +254,10 @@ export async function registerRoutes(
         }
       }
     }
+    // PR #45: wipe any phantom bankroll events (race-grade events whose race no
+    // longer has a real graded result) and recompute the running balance from
+    // scratch off the surviving events only.
+    const phantom = storage.cleanupPhantomBankroll(cardId);
     broadcastEvent("card_updated", { cardId, source: "cleanup" });
     res.json({
       ok: true,
@@ -264,6 +268,7 @@ export async function registerRoutes(
       hadResultBefore: before,
       graded,
       skippedUngraded: skipped,
+      phantomEventsRemoved: phantom.removed,
       bankroll: storage.getCardBankroll(cardId),
     });
   });

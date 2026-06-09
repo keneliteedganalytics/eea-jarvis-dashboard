@@ -76,9 +76,24 @@ describe("track slug map", () => {
     expect(slugify("  Some  Weird Track! ")).toBe("some-weird-track");
   });
 
-  it("builds the expected URL", () => {
+  it("builds the historical date-pattern URL", () => {
     expect(otbResultsUrl("Finger Lakes", "2026-06-03")).toBe(
       "https://www.offtrackbetting.com/results/finger-lakes/2026-06-03.html",
+    );
+  });
+
+  it("builds the track-id URL for the live (today) page", () => {
+    // Pin "now" so the date equals the requested date → live-day branch.
+    const now = Date.parse("2026-06-09T18:00:00Z");
+    expect(otbResultsUrl("Finger Lakes", "2026-06-09", now)).toBe(
+      "https://www.offtrackbetting.com/results/30/finger-lakes.html",
+    );
+  });
+
+  it("falls back to the date URL today for a track with no known track-id", () => {
+    const now = Date.parse("2026-06-09T18:00:00Z");
+    expect(otbResultsUrl("Penn National", "2026-06-09", now)).toBe(
+      "https://www.offtrackbetting.com/results/penn-national/2026-06-09.html",
     );
   });
 });

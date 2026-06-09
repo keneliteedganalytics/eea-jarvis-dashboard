@@ -17,8 +17,17 @@
 
 import * as cheerio from "cheerio";
 
-const USER_AGENT =
-  "EEA-Jarvis-Dashboard/1.0 (contact ken@elite-edge-analytics.com)";
+// Real Chrome UA + Accept headers. Server-side fetches with our own UA string
+// returned a bot-detection stub from OTB on the live day; these headers get the
+// same HTML a browser sees. (PR #45)
+const BROWSER_HEADERS: Record<string, string> = {
+  "User-Agent":
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Cache-Control": "no-cache",
+  Pragma: "no-cache",
+};
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -56,8 +65,36 @@ export function trackSlug(track: string): string {
   return TRACK_SLUGS[key] ?? slugify(track);
 }
 
-export function otbResultsUrl(track: string, dateYMD: string): string {
-  return `https://www.offtrackbetting.com/results/${trackSlug(track)}/${dateYMD}.html`;
+// OTB's stable numeric track IDs, keyed by slug. The live/current-day results
+// page is served at /results/{trackId}/{slug}.html — the date-pattern URL
+// returns a stub for TODAY (confirmed FL=30 on 2026-06-09). Historical dates
+// still use the date-pattern URL. Verified entries are marked; unverified ones
+// fall back to the date URL automatically when absent. (PR #45)
+const TRACK_IDS: Record<string, number> = {
+  "finger-lakes": 30, // verified live 2026-06-09
+  "churchill-downs": 22,
+  "gulfstream-park": 36,
+  "santa-anita": 71,
+  "tampa-bay-downs": 81,
+  "oaklawn-park": 60,
+  "keeneland": 44,
+  "del-mar": 26,
+};
+
+function todayYMD(now: number = Date.now()): string {
+  return new Date(now).toISOString().slice(0, 10);
+}
+
+// Live/current day → track-id URL (the one OTB actually serves with live
+// results). Falls back to the date-pattern URL when the track has no known id
+// or for any historical date.
+export function otbResultsUrl(track: string, dateYMD: string, now: number = Date.now()): string {
+  const slug = trackSlug(track);
+  if (dateYMD === todayYMD(now)) {
+    const tid = TRACK_IDS[slug];
+    if (tid) return `https://www.offtrackbetting.com/results/${tid}/${slug}.html`;
+  }
+  return `https://www.offtrackbetting.com/results/${slug}/${dateYMD}.html`;
 }
 
 export interface OtbFinisher {
@@ -275,23 +312,57 @@ export async function fetchOtbResults(
   dateYMD: string,
   now: number = Date.now(),
 ): Promise<OtbCardResult | null> {
-  const url = otbResultsUrl(track, dateYMD);
+  const url = otbResultsUrl(track, dateYMD, now);
   const hit = cache.get(url);
   if (hit && now - hit.at < CACHE_TTL_MS) return hit.data;
 
+  const html = await fetchOtbHtml(url);
+  if (html == null) return null;
+  const data = parseOtbResults(html, track, dateYMD, new Date(now).toISOString());
+  if (!data) return null;
+  cache.set(url, { data, at: now });
+  return data;
+}
+
+// Fetch the raw OTB HTML for a URL. Tries a plain (browser-header) fetch first;
+// if OTB_USE_PLAYWRIGHT=1 is set it routes through the Playwright browser-session
+// infra (PR #29) instead — same path Equibase/Brisnet use to beat bot detection.
+// Returns null (never throws) on any failure so callers degrade silently.
+async function fetchOtbHtml(url: string): Promise<string | null> {
+  if (process.env.OTB_USE_PLAYWRIGHT === "1") {
+    return fetchOtbHtmlViaPlaywright(url);
+  }
   try {
-    const resp = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+    const resp = await fetch(url, { headers: BROWSER_HEADERS });
     if (!resp.ok) {
       console.warn(`[otb-results] ${url} returned ${resp.status}`);
       return null;
     }
-    const html = await resp.text();
-    const data = parseOtbResults(html, track, dateYMD, new Date(now).toISOString());
-    if (!data) return null;
-    cache.set(url, { data, at: now });
-    return data;
+    return await resp.text();
   } catch (e) {
     console.warn(`[otb-results] fetch failed for ${url}: ${(e as Error).message}`);
+    return null;
+  }
+}
+
+// Playwright fallback for when the plain fetch keeps getting a bot stub. Lazily
+// imports playwright so the module has no hard dep when the flag is off (and the
+// dep is dev-only on some hosts). Loads the page with the same Chrome UA and
+// returns the rendered HTML.
+async function fetchOtbHtmlViaPlaywright(url: string): Promise<string | null> {
+  try {
+    const { chromium } = await import("playwright");
+    const browser = await chromium.launch({ args: ["--no-sandbox"] });
+    try {
+      const ctx = await browser.newContext({ userAgent: BROWSER_HEADERS["User-Agent"] });
+      const page = await ctx.newPage();
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      return await page.content();
+    } finally {
+      await browser.close();
+    }
+  } catch (e) {
+    console.warn(`[otb-results] playwright fetch failed for ${url}: ${(e as Error).message}`);
     return null;
   }
 }
