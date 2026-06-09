@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Volume2, Mic, Check, X } from "lucide-react";
+import { Volume2, Mic, Check, X, ChevronDown, DollarSign } from "lucide-react";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -82,6 +82,110 @@ function StatChip({ label, value }: { label: string; value: string }) {
   );
 }
 
+// $2-base payout fields the user backfills from the chart. winOdds is decimal
+// odds at post; the rest are $2 payoffs. Works on ANY graded race, including
+// past cards (e.g. Card #4) the user is backfilling manually.
+const PAYOUT_FIELDS: { key: keyof PayoutForm; label: string }[] = [
+  { key: "winOdds", label: "Win Odds" },
+  { key: "winPayout", label: "Win $2" },
+  { key: "placePayout", label: "Place $2" },
+  { key: "showPayout", label: "Show $2" },
+  { key: "exactaPayout", label: "Exacta $2" },
+  { key: "trifectaPayout", label: "Trifecta $2" },
+  { key: "superfectaPayout", label: "Super $2" },
+];
+
+interface PayoutForm {
+  winOdds: string;
+  winPayout: string;
+  placePayout: string;
+  showPayout: string;
+  exactaPayout: string;
+  trifectaPayout: string;
+  superfectaPayout: string;
+}
+
+function PayoutsEntry({ race }: { race: RaceWithResult }) {
+  const { toast } = useToast();
+  const r = race.result!;
+  const [open, setOpen] = useState(false);
+  const init: PayoutForm = {
+    winOdds: r.winOdds != null ? String(r.winOdds) : "",
+    winPayout: r.winPayout != null ? String(r.winPayout) : "",
+    placePayout: r.placePayout != null ? String(r.placePayout) : "",
+    showPayout: r.showPayout != null ? String(r.showPayout) : "",
+    exactaPayout: r.exactaPayout != null ? String(r.exactaPayout) : "",
+    trifectaPayout: r.trifectaPayout != null ? String(r.trifectaPayout) : "",
+    superfectaPayout: r.superfectaPayout != null ? String(r.superfectaPayout) : "",
+  };
+  const [form, setForm] = useState<PayoutForm>(init);
+
+  const hasPayouts = PAYOUT_FIELDS.some((f) => (init[f.key] ?? "") !== "");
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const body: Record<string, number | null> = {};
+      for (const f of PAYOUT_FIELDS) {
+        const v = form[f.key].trim();
+        body[f.key] = v === "" ? null : Number(v);
+        if (v !== "" && !Number.isFinite(body[f.key] as number)) {
+          throw new Error(`${f.label} must be a number`);
+        }
+      }
+      await apiRequest("PATCH", `/api/races/${race.id}/payouts`, body);
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: [`/api/cards/${race.cardId}`] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/stats/lifetime"] }),
+      ]);
+      toast({ title: `R${race.raceNumber} payouts saved`, description: "Ledger updated." });
+    },
+    onError: (e: any) => toast({ title: "Invalid", description: e.message, variant: "destructive" }),
+  });
+
+  return (
+    <div className="w-full mt-2 border-t border-gold/10 pt-2">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-gold-dark font-display font-bold hover:text-gold-light"
+        data-testid={`payouts-toggle-${race.raceNumber}`}
+      >
+        <DollarSign className="h-3 w-3" />
+        Enter Payouts
+        {hasPayouts && <span className="text-win normal-case tracking-normal">· saved</span>}
+        <ChevronDown className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="mt-2 flex flex-wrap items-end gap-2">
+          {PAYOUT_FIELDS.map((f) => (
+            <div key={f.key} className="flex flex-col gap-1">
+              <label className="text-[9px] uppercase tracking-wide text-muted-brand">{f.label}</label>
+              <Input
+                value={form[f.key]}
+                onChange={(e) => setForm((s) => ({ ...s, [f.key]: e.target.value }))}
+                placeholder="—"
+                inputMode="decimal"
+                className="w-20 h-8 bg-navy-section border-gold/15 text-silver tabular-nums text-xs"
+                data-testid={`payout-${f.key}-${race.raceNumber}`}
+              />
+            </div>
+          ))}
+          <Button
+            size="sm"
+            onClick={() => save.mutate()}
+            disabled={save.isPending}
+            className="h-8 bg-gold hover:bg-gold-light text-navy-bg"
+            data-testid={`payout-save-${race.raceNumber}`}
+          >
+            Save
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ResultEntry({ race, autoRecap }: { race: RaceWithResult; autoRecap: boolean }) {
   const [value, setValue] = useState("");
   const { toast } = useToast();
@@ -139,6 +243,7 @@ function ResultEntry({ race, autoRecap }: { race: RaceWithResult; autoRecap: boo
         >
           <Volume2 className="h-4 w-4" />
         </Button>
+        <PayoutsEntry race={race} />
       </div>
     );
   }

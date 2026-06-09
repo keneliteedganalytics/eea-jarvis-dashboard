@@ -43,6 +43,22 @@ interface LifetimeStats {
   byTrack: { track: string; cards: number; races: number; graded: number; win: number | null; itm: number | null; lastUpdated: string | null }[];
 }
 
+interface RoiRow {
+  key: string;
+  legs: number;
+  cost: number;
+  payout: number;
+  roi: number | null;
+  hitRate: number | null;
+}
+interface LedgerRoi {
+  byTier: RoiRow[];
+  byPosition: RoiRow[];
+  matrix: { tier: string; position: string; roi: number | null; legs: number }[];
+  byFlag: RoiRow[];
+  overall: RoiRow;
+}
+
 const GOLD = "#C9A227";
 const GOLD_LIGHT = "#E8C14A";
 const WIN = "#4ADE80";
@@ -247,6 +263,118 @@ function ByTrackTable({ rows }: { rows: LifetimeStats["byTrack"] }) {
   );
 }
 
+function fmtMoney(n: number): string {
+  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+}
+function fmtRoi(roi: number | null): string {
+  if (roi == null) return "—";
+  return `${roi >= 0 ? "+" : ""}${roi}%`;
+}
+function roiColor(roi: number | null): string {
+  if (roi == null) return "text-muted-brand";
+  return roi >= 0 ? "text-win" : "text-loss";
+}
+
+function RoiTable({ title, label, rows }: { title: string; label: string; rows: RoiRow[] }) {
+  const settled = rows.filter((r) => r.legs > 0);
+  return (
+    <div className="rounded-lg border border-gold/10 bg-navy-card p-4">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-3">{title}</div>
+      {settled.length === 0 ? (
+        <div className="text-xs text-muted-brand">No settled legs in this scope yet. Enter payouts on the Results page.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-muted-brand uppercase tracking-[0.1em]">
+              <tr>
+                <th className="text-left py-2">{label}</th>
+                <th className="text-right py-2">Legs</th>
+                <th className="text-right py-2">Cost</th>
+                <th className="text-right py-2">Payout</th>
+                <th className="text-right py-2">ROI</th>
+                <th className="text-right py-2">Hit%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {settled.map((r) => (
+                <tr key={r.key} className="border-t border-gold/5 text-silver" data-testid={`roi-row-${r.key}`}>
+                  <td className="py-2 font-display font-bold">{r.key}</td>
+                  <td className="py-2 text-right tabular-nums">{r.legs}</td>
+                  <td className="py-2 text-right tabular-nums">{fmtMoney(r.cost)}</td>
+                  <td className="py-2 text-right tabular-nums">{fmtMoney(r.payout)}</td>
+                  <td className={`py-2 text-right tabular-nums font-bold ${roiColor(r.roi)}`}>{fmtRoi(r.roi)}</td>
+                  <td className="py-2 text-right tabular-nums">{r.hitRate == null ? "—" : `${r.hitRate}%`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RoiMatrix({ cells }: { cells: LedgerRoi["matrix"] }) {
+  const tiers = Array.from(new Set(cells.map((c) => c.tier)));
+  const positions = Array.from(new Set(cells.map((c) => c.position)));
+  const lookup = new Map(cells.map((c) => [`${c.tier}|${c.position}`, c]));
+  const anySettled = cells.some((c) => c.legs > 0);
+  return (
+    <div className="rounded-lg border border-gold/10 bg-navy-card p-4">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-3">Tier × Position ROI</div>
+      {!anySettled ? (
+        <div className="text-xs text-muted-brand">No settled legs in this scope yet.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-muted-brand uppercase tracking-[0.1em]">
+              <tr>
+                <th className="text-left py-2">Tier</th>
+                {positions.map((p) => <th key={p} className="text-right py-2">{p.slice(0, 4)}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {tiers.map((t) => (
+                <tr key={t} className="border-t border-gold/5">
+                  <td className="py-2 font-display font-bold text-silver">{t}</td>
+                  {positions.map((p) => {
+                    const c = lookup.get(`${t}|${p}`);
+                    const roi = c && c.legs > 0 ? c.roi : null;
+                    return (
+                      <td key={p} className={`py-2 text-right tabular-nums ${roiColor(roi)}`} data-testid={`matrix-${t}-${p}`}>
+                        {c && c.legs > 0 ? fmtRoi(roi) : "·"}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RoiSections({ roi }: { roi: LedgerRoi }) {
+  return (
+    <div className="mt-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-display font-black text-silver uppercase tracking-[0.14em]">Strategy ROI</h2>
+        <span className={`text-sm font-display font-bold tabular-nums ${roiColor(roi.overall.roi)}`} data-testid="roi-overall">
+          Overall {fmtRoi(roi.overall.roi)} · {fmtMoney(roi.overall.payout)} / {fmtMoney(roi.overall.cost)}
+        </span>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <RoiTable title="Tier ROI" label="Tier" rows={roi.byTier} />
+        <RoiTable title="Position ROI" label="Position" rows={roi.byPosition} />
+      </div>
+      <RoiMatrix cells={roi.matrix} />
+      <RoiTable title="Flag ROI" label="Flag" rows={roi.byFlag} />
+    </div>
+  );
+}
+
 export default function Analytics() {
   const [scope, setScope] = useState<Scope>("today");
   const [selectedTrack, setSelectedTrack] = useState<string | null>(null);
@@ -303,6 +431,25 @@ export default function Analytics() {
   }, [scope, todayCards, todaySubTrack, selectedTrack, today]);
 
   const { data, isLoading } = useQuery<AnalyticsSummary>({ queryKey: [summaryUrl] });
+
+  // Parallel ROI query — mirrors the scope logic of summaryUrl against /api/analytics/roi
+  const roiUrl = useMemo(() => {
+    if (scope === "today") {
+      if (todayCards.length >= 2 && todaySubTrack) {
+        return `/api/analytics/roi?scope=track&track=${encodeURIComponent(todaySubTrack)}&date=${today}`;
+      }
+      if (todayCards.length === 1) {
+        return `/api/analytics/roi?scope=track&track=${encodeURIComponent(todayCards[0].track)}&date=${today}`;
+      }
+      return `/api/analytics/roi?scope=today`;
+    }
+    if (scope === "track" && selectedTrack) {
+      return `/api/analytics/roi?scope=track&track=${encodeURIComponent(selectedTrack)}`;
+    }
+    return `/api/analytics/roi?scope=lifetime`;
+  }, [scope, todayCards, todaySubTrack, selectedTrack, today]);
+
+  const { data: roi } = useQuery<LedgerRoi>({ queryKey: [roiUrl] });
 
   const scopeLabel = useMemo(() => {
     if (scope === "today") {
@@ -363,7 +510,10 @@ export default function Analytics() {
               {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-64 w-full" />)}
             </div>
           ) : (
-            <Charts data={data} />
+            <>
+              <Charts data={data} />
+              {roi && <RoiSections roi={roi} />}
+            </>
           )}
         </>
       )}

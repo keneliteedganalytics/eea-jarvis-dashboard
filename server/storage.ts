@@ -17,6 +17,7 @@ import {
   cardShows,
   raceWeather,
   deepPostmortems,
+  betLegs,
 } from "@shared/schema";
 import type {
   Card,
@@ -53,6 +54,7 @@ import type {
   ShowManifest,
   DeepPostmortemRow,
   DeepPostmortem,
+  BetLegRow,
 } from "@shared/schema";
 import type { PedigreeSummary } from "@shared/schema";
 import { db } from "./db";
@@ -60,6 +62,11 @@ import { eq, and, isNull, desc } from "drizzle-orm";
 import { gradeRace, gradeFlags } from "./grading";
 import { DEFAULT_WEIGHTS, PERSONA_V1 } from "./services/eea-config";
 import { buildWagers } from "./services/wagers";
+import {
+  buildBudgetedBets,
+  configFromSettings,
+  type RaceBets as BudgetedRaceBets,
+} from "./services/budgeted-bets";
 import { getBloodstockForCard } from "./services/brisnet-ingest";
 
 export interface IStorage {
@@ -88,6 +95,11 @@ export interface IStorage {
   // Results
   getResultByRace(raceId: number): Result | undefined;
   logResult(raceId: number, finishOrder: string[], opts?: Partial<Result>): Result;
+  updateResultPayouts(raceId: number, payouts: Partial<Result>): Result | undefined;
+
+  // Bet ledger (PR #40)
+  getBetLegsByCard(cardId: number): BetLegRow[];
+  getAllBetLegs(): BetLegRow[];
 
   // Settings
   getSettings(): Settings;
@@ -203,18 +215,74 @@ export class DatabaseStorage implements IStorage {
     // (Race Detail, Print) renders identical numbers off the same race rows.
     const s = this.getSettings();
     const racesOnCard = raceRows.length;
+
+    // PR #40: NEW cards (betBudgetVersion >= 2) use the tier-weighted $1k
+    // BudgetedBetBuilder, computed across the whole card. Historical cards
+    // (version 1, e.g. Card #4) keep their legacy flat bets AS-IS.
+    const useBudgeted = (card.betBudgetVersion ?? 1) >= 2;
+    const budgetedByRace: Map<number, BudgetedRaceBets> | null = useBudgeted
+      ? buildBudgetedBets(raceRows, configFromSettings(s))
+      : null;
+
     // DRM pedigree names for this card (race#|pgm → sire/dam/dam-sire), used to
     // enrich the bloodstock chip's tooltip. Empty when the card was never
     // DRM-ingested, in which case the chip falls back to confidence "none".
     const pedigreeNames = getBloodstockForCard(card.date, card.track);
-    const withResults: RaceWithResult[] = raceRows.map((r) => ({
-      ...r,
-      result: this.getResultByRace(r.id) ?? null,
-      bets: buildWagers(r, { bankroll: s.bankroll, dailyRiskCapPct: s.dailyRiskCapPct }, racesOnCard),
-      weather: this.getRaceWeather(r.id),
-      pedigree: this.buildPedigree(r.id, r.raceNumber, pedigreeNames),
-    }));
+    const withResults: RaceWithResult[] = raceRows.map((r) => {
+      const bets = budgetedByRace
+        ? budgetedByRace.get(r.id) ?? { tier: r.tier as any, raceAllocation: 0, pass: true, legs: [] }
+        : buildWagers(r, { bankroll: s.bankroll, dailyRiskCapPct: s.dailyRiskCapPct }, racesOnCard);
+      return {
+        ...r,
+        result: this.getResultByRace(r.id) ?? null,
+        bets,
+        weather: this.getRaceWeather(r.id),
+        pedigree: this.buildPedigree(r.id, r.raceNumber, pedigreeNames),
+      };
+    });
+
+    // Lazily persist the bet_legs ledger the first time a race is read with bets
+    // and has no ledger rows yet. Idempotent: once rows exist for a race we never
+    // re-write them, so payouts/hits entered later are preserved.
+    this.ensureLedgerForCard(card.id, withResults);
+
     return { ...card, races: withResults };
+  }
+
+  // Write one bet_legs row per leg for any race on this card that has bets but
+  // no ledger rows yet. Costs come from the (budgeted or flat) bets; payout/hit
+  // start null and are filled in on payouts entry. This is both the live
+  // persistence path for new cards and the boot backfill for historical cards.
+  private ensureLedgerForCard(cardId: number, racesWithBets: RaceWithResult[]): void {
+    for (const r of racesWithBets) {
+      const legs = r.bets?.legs ?? [];
+      if (legs.length === 0) continue;
+      const existing = db
+        .select({ id: betLegs.id })
+        .from(betLegs)
+        .where(eq(betLegs.raceId, r.id))
+        .all();
+      if (existing.length > 0) continue;
+      const flagsJson = r.flags || "[]";
+      for (const leg of legs) {
+        db.insert(betLegs)
+          .values({
+            raceId: r.id,
+            cardId,
+            tier: r.bets?.tier ?? r.tier,
+            legType: leg.type,
+            structure: leg.structure,
+            cost: leg.cost,
+            payout: null,
+            hit: null,
+            flagsJson,
+          })
+          .run();
+      }
+      // If the race is already graded, immediately reconcile hit/payout so the
+      // ledger reflects known outcomes without waiting for a re-grade.
+      if (r.result) this.applyResultToLedger(r.id, r.result);
+    }
   }
 
   // Build the per-program pedigree summaries the bloodstock chip renders, keyed
@@ -285,6 +353,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   deleteCard(id: number): void {
+    db.delete(betLegs).where(eq(betLegs.cardId, id)).run();
     db.delete(ppUploads).where(eq(ppUploads.cardId, id)).run();
     db.delete(races).where(eq(races.cardId, id)).run();
     db.delete(cards).where(eq(cards.id, id)).run();
@@ -428,6 +497,7 @@ export class DatabaseStorage implements IStorage {
         superfectaHit: graded.superfectaHit,
         flagsHit: JSON.stringify(flagsHit),
         autoFetched: opts.autoFetched ?? false,
+        winOdds: opts.winOdds ?? null,
         winPayout: opts.winPayout ?? null,
         placePayout: opts.placePayout ?? null,
         showPayout: opts.showPayout ?? null,
@@ -438,7 +508,82 @@ export class DatabaseStorage implements IStorage {
       })
       .returning()
       .get();
+    // Reconcile the bet_legs ledger with this grade + any payouts entered.
+    this.applyResultToLedger(raceId, row);
     return row;
+  }
+
+  // Backfill payouts (and/or win odds) onto an already-graded race without
+  // re-entering the finish order. Works on ANY graded card, including past ones
+  // (e.g. Card #4) the user is backfilling from chart data. Re-reconciles the
+  // ledger so per-leg payout/hit reflect the new numbers.
+  updateResultPayouts(raceId: number, payouts: Partial<Result>): Result | undefined {
+    const existing = this.getResultByRace(raceId);
+    if (!existing) return undefined;
+    const patch: Partial<Result> = {};
+    const keys: (keyof Result)[] = [
+      "winOdds", "winPayout", "placePayout", "showPayout",
+      "exactaPayout", "trifectaPayout", "superfectaPayout",
+    ];
+    for (const k of keys) {
+      if (k in payouts) (patch as any)[k] = (payouts as any)[k] ?? null;
+    }
+    db.update(results).set(patch).where(eq(results.raceId, raceId)).run();
+    const row = this.getResultByRace(raceId);
+    if (row) this.applyResultToLedger(raceId, row);
+    return row;
+  }
+
+  // ── Bet ledger (PR #40) ───────────────────────────────────────────────────
+  getBetLegsByCard(cardId: number): BetLegRow[] {
+    return db.select().from(betLegs).where(eq(betLegs.cardId, cardId)).all();
+  }
+
+  getAllBetLegs(): BetLegRow[] {
+    return db.select().from(betLegs).all();
+  }
+
+  // Set hit + payout on each ledger leg for a race from its result row. Per-leg
+  // payout is computed off the $2-base payoff: leg won → (cost / 2) * payout.
+  // Legs whose position the pick missed get hit=false, payout=0. When a payoff
+  // wasn't entered the leg is marked hit but payout stays null (unknown return).
+  private applyResultToLedger(raceId: number, result: Result): void {
+    const legs = db.select().from(betLegs).where(eq(betLegs.raceId, raceId)).all();
+    if (legs.length === 0) return;
+    const hitForLeg = (legType: string): boolean | null => {
+      switch (legType) {
+        case "WIN": return result.winHit ?? null;
+        case "PLACE": return result.placeHit ?? null;
+        case "SHOW": return result.showHit ?? null;
+        case "EXACTA": return result.exactaHit ?? null;
+        case "TRIFECTA": return result.trifectaHit ?? null;
+        case "SUPERFECTA": return result.superfectaHit ?? null;
+        default: return null;
+      }
+    };
+    const payoutForLeg = (legType: string): number | null => {
+      switch (legType) {
+        case "WIN": return result.winPayout ?? null;
+        case "PLACE": return result.placePayout ?? null;
+        case "SHOW": return result.showPayout ?? null;
+        case "EXACTA": return result.exactaPayout ?? null;
+        case "TRIFECTA": return result.trifectaPayout ?? null;
+        case "SUPERFECTA": return result.superfectaPayout ?? null;
+        default: return null;
+      }
+    };
+    for (const leg of legs) {
+      const hit = hitForLeg(leg.legType);
+      let payout: number | null = null;
+      if (hit === true) {
+        const payoff = payoutForLeg(leg.legType);
+        // Per spec: leg payout = (cost / 2) * payoff. Null payoff → unknown return.
+        payout = payoff != null ? Math.round((leg.cost / 2) * payoff * 100) / 100 : null;
+      } else if (hit === false) {
+        payout = 0;
+      }
+      db.update(betLegs).set({ hit, payout }).where(eq(betLegs.id, leg.id)).run();
+    }
   }
 
   // ── Daily Show ──────────────────────────────────────────────────────────

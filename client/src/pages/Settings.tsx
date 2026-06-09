@@ -28,6 +28,44 @@ const PREMADE_VOICES = [
 
 interface LiveVoice { id: string; name: string; desc: string }
 
+// ── PR #40: budgeted allocator config (tier weights + leg patterns) ─────────
+const ROI_TIERS = ["SNIPER", "EDGE", "DUAL", "RECON", "PASS"] as const;
+type RoiTier = (typeof ROI_TIERS)[number];
+const LEG_KEYS = ["win", "place", "show", "exacta", "trifecta", "superfecta"] as const;
+type LegKey = (typeof LEG_KEYS)[number];
+
+const DEFAULT_TIER_WEIGHTS: Record<RoiTier, number> = {
+  SNIPER: 30, EDGE: 18, DUAL: 10, RECON: 4, PASS: 0,
+};
+const DEFAULT_LEG_PATTERNS: Record<RoiTier, Record<LegKey, number>> = {
+  SNIPER: { win: 50, place: 20, show: 0, exacta: 15, trifecta: 15, superfecta: 0 },
+  EDGE: { win: 45, place: 25, show: 0, exacta: 30, trifecta: 0, superfecta: 0 },
+  DUAL: { win: 35, place: 30, show: 20, exacta: 15, trifecta: 0, superfecta: 0 },
+  RECON: { win: 100, place: 0, show: 0, exacta: 0, trifecta: 0, superfecta: 0 },
+  PASS: { win: 0, place: 0, show: 0, exacta: 0, trifecta: 0, superfecta: 0 },
+};
+
+function parseTierWeights(json: string | undefined): Record<RoiTier, number> {
+  const out = { ...DEFAULT_TIER_WEIGHTS };
+  try {
+    const p = JSON.parse(json || "{}");
+    for (const t of ROI_TIERS) if (typeof p[t] === "number") out[t] = p[t];
+  } catch { /* defaults */ }
+  return out;
+}
+function parseLegPatterns(json: string | undefined): Record<RoiTier, Record<LegKey, number>> {
+  const out: Record<RoiTier, Record<LegKey, number>> = JSON.parse(JSON.stringify(DEFAULT_LEG_PATTERNS));
+  try {
+    const p = JSON.parse(json || "{}");
+    for (const t of ROI_TIERS) {
+      if (p[t] && typeof p[t] === "object") {
+        for (const k of LEG_KEYS) if (typeof p[t][k] === "number") out[t][k] = p[t][k];
+      }
+    }
+  } catch { /* defaults */ }
+  return out;
+}
+
 function Section({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-gold/15 bg-navy-card p-5">
@@ -98,17 +136,36 @@ export default function Settings() {
   const { toast } = useToast();
   const jarvis = useJarvis();
   const [form, setForm] = useState<Partial<SettingsType>>({});
+  const [tierWeights, setTierWeights] = useState<Record<RoiTier, number>>(DEFAULT_TIER_WEIGHTS);
+  const [legPatterns, setLegPatterns] = useState<Record<RoiTier, Record<LegKey, number>>>(DEFAULT_LEG_PATTERNS);
 
   useEffect(() => {
-    if (settings) setForm(settings);
+    if (settings) {
+      setForm(settings);
+      setTierWeights(parseTierWeights(settings.tierWeightsJson));
+      setLegPatterns(parseLegPatterns(settings.legPatternsJson));
+    }
   }, [settings]);
 
   const set = <K extends keyof SettingsType>(k: K, v: SettingsType[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
+  const resetAllocatorDefaults = () => {
+    setTierWeights({ ...DEFAULT_TIER_WEIGHTS });
+    setLegPatterns(JSON.parse(JSON.stringify(DEFAULT_LEG_PATTERNS)));
+    setForm((f) => ({ ...f, dailyRiskBudget: 1000, chaosDemotionMode: "floor-recon" }));
+  };
+
+  const weightSum = ROI_TIERS.reduce((a, t) => a + (tierWeights[t] || 0), 0);
+
   const save = useMutation({
     mutationFn: async () => {
-      await apiRequest("PATCH", "/api/settings", form);
+      const payload = {
+        ...form,
+        tierWeightsJson: JSON.stringify(tierWeights),
+        legPatternsJson: JSON.stringify(legPatterns),
+      };
+      await apiRequest("PATCH", "/api/settings", payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
@@ -203,6 +260,91 @@ export default function Settings() {
             <Field label="Dual Share"><Input type="number" step="0.01" value={form.tierShareDual ?? 0} onChange={(e) => set("tierShareDual", parseFloat(e.target.value) || 0)} className="bg-navy-section border-gold/15 text-silver tabular-nums" data-testid="input-share-dual" /></Field>
             <Field label="Recon Share"><Input type="number" step="0.01" value={form.tierShareRecon ?? 0} onChange={(e) => set("tierShareRecon", parseFloat(e.target.value) || 0)} className="bg-navy-section border-gold/15 text-silver tabular-nums" data-testid="input-share-recon" /></Field>
           </div>
+        </Section>
+
+        {/* PR #40: $1k daily risk budget + tier-weighted allocator */}
+        <Section title="Daily Risk Budget &amp; Allocator" desc="Tier-weighted $1k/day allocator for NEW cards. Historical cards keep their legacy bets.">
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Field label="Daily Risk Budget ($)">
+              <Input type="number" step="50" value={form.dailyRiskBudget ?? 1000} onChange={(e) => set("dailyRiskBudget", parseFloat(e.target.value) || 0)} className="bg-navy-section border-gold/15 text-silver tabular-nums" data-testid="input-daily-budget" />
+            </Field>
+            <Field label="Chaos Demotion Mode">
+              <Select value={form.chaosDemotionMode ?? "floor-recon"} onValueChange={(v) => set("chaosDemotionMode", v)}>
+                <SelectTrigger className="bg-navy-section border-gold/15 text-silver" data-testid="select-chaos-mode"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="floor-recon">Floor RECON (default)</SelectItem>
+                  <SelectItem value="aggressive">Aggressive (RECON→PASS)</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+
+          {/* Tier weights */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-[10px] uppercase tracking-[0.16em] text-gold-dark font-display font-bold">Tier Weights</label>
+              <span className={`text-[10px] tabular-nums ${weightSum > 100 ? "text-loss" : "text-muted-brand"}`} data-testid="weight-sum">
+                sum {weightSum}{weightSum > 100 ? " — exceeds 100" : ""}
+              </span>
+            </div>
+            <div className="grid grid-cols-5 gap-2">
+              {ROI_TIERS.map((t) => (
+                <div key={t} className="flex flex-col gap-1">
+                  <span className="text-[9px] uppercase tracking-wide text-muted-brand text-center">{t}</span>
+                  <Input
+                    type="number"
+                    value={tierWeights[t]}
+                    onChange={(e) => setTierWeights((w) => ({ ...w, [t]: parseFloat(e.target.value) || 0 }))}
+                    className="bg-navy-section border-gold/15 text-silver tabular-nums text-center text-xs h-8"
+                    data-testid={`weight-${t}`}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Leg patterns per tier */}
+          <div>
+            <label className="text-[10px] uppercase tracking-[0.16em] text-gold-dark font-display font-bold">Leg Patterns (% of race budget)</label>
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-muted-brand uppercase tracking-[0.1em]">
+                  <tr>
+                    <th className="text-left py-1.5">Tier</th>
+                    {LEG_KEYS.map((k) => <th key={k} className="text-center py-1.5">{k.slice(0, 4)}</th>)}
+                    <th className="text-right py-1.5">Σ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ROI_TIERS.filter((t) => t !== "PASS").map((t) => {
+                    const rowSum = LEG_KEYS.reduce((a, k) => a + (legPatterns[t][k] || 0), 0);
+                    return (
+                      <tr key={t} className="border-t border-gold/5">
+                        <td className="py-1.5 font-display font-bold text-silver">{t}</td>
+                        {LEG_KEYS.map((k) => (
+                          <td key={k} className="py-1 px-0.5">
+                            <Input
+                              type="number"
+                              value={legPatterns[t][k]}
+                              onChange={(e) => setLegPatterns((p) => ({ ...p, [t]: { ...p[t], [k]: parseFloat(e.target.value) || 0 } }))}
+                              className="bg-navy-section border-gold/15 text-silver tabular-nums text-center text-xs h-8 w-14 mx-auto"
+                              data-testid={`pattern-${t}-${k}`}
+                            />
+                          </td>
+                        ))}
+                        <td className={`py-1.5 text-right tabular-nums ${rowSum === 100 ? "text-win" : "text-loss"}`} data-testid={`pattern-sum-${t}`}>{rowSum}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-2 text-[10px] text-muted-brand">Each tier row should sum to 100%. Rows that don't are flagged in red.</div>
+          </div>
+
+          <Button onClick={resetAllocatorDefaults} variant="outline" className="border-gold/30 text-gold hover:bg-gold/10" data-testid="button-reset-allocator">
+            Reset to defaults
+          </Button>
         </Section>
 
         {/* Auto-tuner proposals */}
