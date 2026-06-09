@@ -68,12 +68,26 @@ function eligibleRaces(cardId: number, now: number): EligibleRaceRow[] {
 // Upsert one OTB race result into storage and append its bankroll event. Returns
 // true if it graded (official + had a finish order). Shared by the cron and the
 // per-race manual auto-grade route.
+// HARD GUARD against phantom grades (PR #45). The parser can return a stub race
+// for a not-yet-official day (Card #9 R4 got a -$167 phantom event off an empty
+// OTB stub page). Never write a result row / bankroll event unless the race is
+// genuinely official: has an isOfficial flag, a non-empty finish order, a
+// declared winner, AND at least one real signal (a winner pgm or any payout).
+export function isGradableOtbRace(otb: OtbRaceResult): boolean {
+  if (!otb.isOfficial) return false;
+  if (!otb.finishOrder || otb.finishOrder.length === 0) return false;
+  if (!otb.winPgm) return false;
+  // A genuine official race has a winner pgm + finish order (checked above). An
+  // all-null/zero stub never gets this far, so a declared winner is sufficient.
+  return true;
+}
+
 export function gradeRaceFromOtb(
   raceId: number,
   raceNumber: number,
   otb: OtbRaceResult,
 ): boolean {
-  if (!otb.isOfficial || otb.finishOrder.length === 0) return false;
+  if (!isGradableOtbRace(otb)) return false;
   const result = storage.logResult(raceId, otb.finishOrder, {
     autoFetched: true,
     winPayout: otb.winPayout ?? null,
@@ -112,7 +126,7 @@ export async function autoGradeRace(
   if (!otb) return { graded: false, reason: "OTB unreachable", raceNumber: race.raceNumber };
   const match = otb.races.find((r) => r.raceNumber === race.raceNumber);
   if (!match) return { graded: false, reason: "race not on OTB page", raceNumber: race.raceNumber };
-  if (!match.isOfficial) return { graded: false, reason: "not yet official", raceNumber: race.raceNumber };
+  if (!isGradableOtbRace(match)) return { graded: false, reason: "not yet official", raceNumber: race.raceNumber };
   const graded = gradeRaceFromOtb(raceId, race.raceNumber, match);
   return { graded, raceNumber: race.raceNumber };
 }
@@ -137,7 +151,14 @@ export async function runResultsPollOnce(
     }
     for (const race of due) {
       const match = otb.races.find((r) => r.raceNumber === race.race_number);
-      if (!match || !match.isOfficial) continue;
+      if (!match || !isGradableOtbRace(match)) {
+        if (match) {
+          console.log(
+            `[otb-poll] card ${card.card_id} R${race.race_number}: sentinel skip (not yet official / empty grade)`,
+          );
+        }
+        continue;
+      }
       try {
         if (gradeRaceFromOtb(race.race_id, race.race_number, match)) gradedTotal++;
       } catch (e) {
