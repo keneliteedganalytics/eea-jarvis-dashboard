@@ -138,6 +138,43 @@ export function ppFilename(trackCode: string, d: Date): string {
   return `${trackCode.toUpperCase()}${mmdd(d)}FPP.PDF`;
 }
 
+// ── Equibase race chart (post-race results) URL — PR #30 ──────────────────────
+// The Full Charts page links each track's chart as a static .html wrapper named
+// {TID}{MMDDYY}USA.html with a 2-DIGIT year (confirmed by recon 2026-06-08:
+// FL060826USA.html = Finger Lakes Jun 8 2026). The HTML wraps the actual PDF.
+const CHART_BASE = "https://www.equibase.com/static/chart/pdf";
+
+// "MMDDYY" — 2-digit year, the date segment embedded in the chart filename.
+export function chartMmddyy(d: Date): string {
+  return `${pad2(d.getMonth() + 1)}${pad2(d.getDate())}${pad2(d.getFullYear() % 100)}`;
+}
+
+// Build the chart HTML wrapper URL, e.g.
+//   https://www.equibase.com/static/chart/pdf/FL060926USA.html
+export function buildChartUrl(
+  trackCode: string,
+  raceDate: Date,
+  country = "USA",
+): string {
+  return `${CHART_BASE}/${trackCode.toUpperCase()}${chartMmddyy(raceDate)}${country}.html`;
+}
+
+// Pull the actual chart PDF URL out of the .html wrapper. The wrapper embeds the
+// PDF as an <iframe src> or <a href> ending in .pdf; we grab the first such
+// match and resolve it against the chart base. Returns null if none is found
+// (caller then logs the body under EQUIBASE_DEBUG=1 to refine this regex).
+export function extractChartPdfUrl(html: string, baseUrl: string): string | null {
+  const m =
+    html.match(/(?:src|href)\s*=\s*["']([^"']+\.pdf(?:\?[^"']*)?)["']/i) ||
+    html.match(/["']([^"']*\/chart\/[^"']+\.pdf(?:\?[^"']*)?)["']/i);
+  if (!m) return null;
+  try {
+    return new URL(m[1], baseUrl).toString();
+  } catch {
+    return null;
+  }
+}
+
 // Build the subscription download URL. `transid` is server-generated and must
 // be scraped from the PP page — it cannot be invented — so it's a required arg.
 export function buildDownloadUrl(
@@ -438,6 +475,91 @@ export async function downloadPPWithSession(
   const pdfPath = path.join(dir, `${track.trackCode}.pdf`);
   fs.writeFileSync(pdfPath, buf);
   return { pdfPath, byteCount: buf.length, httpStatus };
+}
+
+// Download a post-race chart PDF using a Playwright-harvested session (PR #30).
+// Two-step: GET the .html wrapper, regex out the embedded .pdf URL, then GET the
+// PDF with the same cookie jar + UA. Returns the chart PDF bytes (or throws).
+// NOTE: this is the POST-race results chart. For PRE-race PPs (handicapping
+// input) see fetchPreRacePPDebug below — that URL is not yet captured.
+export async function downloadChartPdfWithSession(
+  session: BrowserSession,
+  trackCode: string,
+  raceDate: Date,
+  country = "USA",
+): Promise<{ pdfPath: string; byteCount: number; httpStatus: number }> {
+  const headers = {
+    "User-Agent": session.userAgent,
+    Cookie: cookieHeaderFrom(session.cookies),
+  };
+  const htmlUrl = buildChartUrl(trackCode, raceDate, country);
+  const htmlRes = await fetch(htmlUrl, { headers });
+  if (!htmlRes.ok) {
+    throw new Error(`chart wrapper HTTP ${htmlRes.status} for ${trackCode}`);
+  }
+  const html = await htmlRes.text();
+  const pdfUrl = extractChartPdfUrl(html, htmlUrl);
+  if (!pdfUrl) {
+    if (process.env.EQUIBASE_DEBUG === "1") {
+      console.log(
+        `[equibase-debug] no .pdf URL in chart wrapper ${htmlUrl}; body follows:\n` +
+          html.slice(0, 4000),
+      );
+    }
+    throw new Error(
+      `chart wrapper for ${trackCode} did not contain a .pdf link ` +
+        `(set EQUIBASE_DEBUG=1 to dump the HTML body)`,
+    );
+  }
+
+  const pdfRes = await fetch(pdfUrl, { headers });
+  const httpStatus = pdfRes.status;
+  if (!pdfRes.ok) {
+    throw new Error(`chart PDF HTTP ${httpStatus} for ${trackCode}`);
+  }
+  const buf = Buffer.from(await pdfRes.arrayBuffer());
+  if (!buf.subarray(0, 5).toString("latin1").startsWith("%PDF-")) {
+    throw new Error(
+      `chart for ${trackCode} was not a PDF (${buf.length} bytes)`,
+    );
+  }
+  const dir = ppDirForDate(raceDate);
+  fs.mkdirSync(dir, { recursive: true });
+  const pdfPath = path.join(dir, `${trackCode.toUpperCase()}-chart.pdf`);
+  fs.writeFileSync(pdfPath, buf);
+  return { pdfPath, byteCount: buf.length, httpStatus };
+}
+
+// TODO(PR #30): capture the PRE-race Premium PP download URL.
+//
+// Recon confirmed the POST-race chart pattern (buildChartUrl above) but NOT the
+// pre-race PP download URL, which is what the handicapping engine actually
+// wants. The PP product page is eqbProductPage.cfm?pid=PP. On the first live
+// authenticated run, call this with EQUIBASE_DEBUG=1 to dump the product-page
+// HTML so we can pin down the real download href, then wire a buildPPUrl() the
+// same way buildChartUrl is wired. Until then this only logs — it never
+// fabricates a URL.
+const PP_PRODUCT_PAGE_URL =
+  "https://www.equibase.com/premium/eqbProductPage.cfm?pid=PP";
+
+export async function fetchPreRacePPDebug(
+  session: BrowserSession,
+): Promise<{ status: number; bodyLength: number }> {
+  const res = await fetch(PP_PRODUCT_PAGE_URL, {
+    headers: {
+      "User-Agent": session.userAgent,
+      Cookie: cookieHeaderFrom(session.cookies),
+    },
+  });
+  const body = await res.text();
+  if (process.env.EQUIBASE_DEBUG === "1") {
+    console.log(
+      `[equibase-debug] eqbProductPage.cfm?pid=PP -> ${res.status}; body follows ` +
+        `(grep for download/href/.pdf to capture the pre-race PP URL):\n` +
+        body.slice(0, 8000),
+    );
+  }
+  return { status: res.status, bodyLength: body.length };
 }
 
 export async function parsePP(

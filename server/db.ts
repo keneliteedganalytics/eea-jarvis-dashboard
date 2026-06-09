@@ -1,7 +1,46 @@
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
+import fs from "node:fs";
+import path from "node:path";
 
-const sqlite = new Database(process.env.DATABASE_FILE || "data.db");
+// Resolve the SQLite file path.
+//
+// The production default is `/data/data.db` — Railway's persistent volume is
+// mounted at `/data`, and a RELATIVE default ("data.db") resolves to
+// `/app/data.db` INSIDE the container image, which is wiped on every deploy.
+// That bug silently destroyed every card all evening (PR #30). If
+// DATABASE_FILE is set we honor it verbatim; otherwise we prefer the persistent
+// mount and fall back to a repo-local `./data.db` for local dev where `/data`
+// doesn't exist.
+export function resolveDbPath(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.DATABASE_FILE) return env.DATABASE_FILE;
+  return fs.existsSync("/data") ? "/data/data.db" : "./data.db";
+}
+
+// Best-effort: is the directory that will hold the DB file writable? Logged at
+// startup so a non-persisted / read-only mount is obvious in the Railway logs
+// (the symptom that masked the wipe bug for hours).
+function parentDirWritable(dbPath: string): boolean {
+  const dir = path.dirname(path.resolve(dbPath));
+  try {
+    fs.accessSync(dir, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const DB_PATH = resolveDbPath();
+// Quiet under vitest so the 40+ test files that each open a DB don't spam.
+if (process.env.NODE_ENV !== "test" && process.env.VITEST !== "true") {
+  const persisted = DB_PATH.startsWith("/data/");
+  console.log(
+    `[db] sqlite path=${DB_PATH} persisted=${persisted} ` +
+      `writable=${parentDirWritable(DB_PATH)}`,
+  );
+}
+
+const sqlite = new Database(DB_PATH);
 sqlite.pragma("journal_mode = WAL");
 
 // Create all tables if they don't yet exist. This guarantees the schema is

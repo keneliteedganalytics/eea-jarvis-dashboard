@@ -27,8 +27,10 @@ import { cookieHeaderFrom, type BrowserSession } from "./browser-session";
 
 const LOGIN_URL = "https://www.brisnet.com/product/login";
 const DOWNLOAD_BASE = "https://www.brisnet.com/product/download";
-// URL segments observed for US thoroughbred multi-file PP downloads.
-const PRODUCT_CODE = "DRM";
+// URL segments captured from the live authenticated browser session (PR #30
+// recon 2026-06-08). The product/format segment is lowercase `drm` — PR #29
+// guessed uppercase `DRM`, which 404'd.
+const PRODUCT_CODE = "drm";
 const COUNTRY = "USA";
 const RACE_TYPE = "TB";
 
@@ -116,8 +118,9 @@ export function ymd(d: Date): string {
   return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}`;
 }
 
-// Build the DRM download URL:
-//   /product/download/{YYYY-MM-DD}/DRM/USA/TB/{TRACK}/D/0/
+// Build the DRM download URL (PR #30 — confirmed from live recon):
+//   /product/download/{YYYY-MM-DD}/drm/USA/TB/{TRACK}/D/0/
+// e.g. https://www.brisnet.com/product/download/2026-06-08/drm/USA/TB/FL/D/0/
 export function buildDownloadUrl(trackCode: string, raceDate: Date): string {
   const segs = [
     DOWNLOAD_BASE,

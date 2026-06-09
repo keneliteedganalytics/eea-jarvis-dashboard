@@ -12,10 +12,12 @@
 
 import "dotenv/config";
 import { getOrAcquire } from "../server/services/session-cache";
-import { ingestForDate } from "../server/services/equibase-ingest";
+import { ingestForDate, tomorrowInBoise } from "../server/services/equibase-ingest";
 
+// Default to tomorrow's racing day in America/Boise (matches the 6am cron) when
+// DATE is unset; otherwise parse the explicit YYYY-MM-DD.
 function parseDate(s: string | undefined): Date {
-  if (!s) return new Date();
+  if (!s) return tomorrowInBoise();
   const [y, m, d] = s.split("-").map(Number);
   return new Date(y, m - 1, d);
 }

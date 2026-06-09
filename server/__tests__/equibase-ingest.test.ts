@@ -5,6 +5,9 @@ import {
   ymd,
   ppFilename,
   buildDownloadUrl,
+  buildChartUrl,
+  chartMmddyy,
+  extractChartPdfUrl,
   parseAvailableTracks,
   parseSetCookies,
   loginEquibase,
@@ -52,6 +55,54 @@ describe("buildDownloadUrl", () => {
   it("uppercases the track code in the filename", () => {
     const u = new URL(buildDownloadUrl("gp", JUN8, "1"));
     expect(u.searchParams.get("filename")).toBe("GP0608FPP.PDF");
+  });
+});
+
+describe("buildChartUrl (PR #30 — post-race chart, 2-digit year)", () => {
+  it("formats MMDDYY with a 2-digit year", () => {
+    expect(chartMmddyy(JUN8)).toBe("060826");
+    expect(chartMmddyy(new Date(2026, 5, 9))).toBe("060926");
+    expect(chartMmddyy(new Date(2026, 0, 1))).toBe("010126");
+  });
+
+  it("builds the exact chart wrapper URL FL060926USA.html", () => {
+    expect(buildChartUrl("FL", new Date(2026, 5, 9))).toBe(
+      "https://www.equibase.com/static/chart/pdf/FL060926USA.html",
+    );
+  });
+
+  it("matches the recon-confirmed FL Jun 8 2026 chart URL", () => {
+    expect(buildChartUrl("fl", JUN8)).toBe(
+      "https://www.equibase.com/static/chart/pdf/FL060826USA.html",
+    );
+  });
+
+  it("honors a non-USA country code", () => {
+    expect(buildChartUrl("WO", new Date(2026, 5, 7), "CAN")).toBe(
+      "https://www.equibase.com/static/chart/pdf/WO060726CAN.html",
+    );
+  });
+});
+
+describe("extractChartPdfUrl", () => {
+  const BASE = "https://www.equibase.com/static/chart/pdf/FL060926USA.html";
+
+  it("pulls an iframe src ending in .pdf and resolves it absolute", () => {
+    const html = `<html><body><iframe src="FL060926USA.pdf"></iframe></body></html>`;
+    expect(extractChartPdfUrl(html, BASE)).toBe(
+      "https://www.equibase.com/static/chart/pdf/FL060926USA.pdf",
+    );
+  });
+
+  it("pulls an anchor href ending in .pdf", () => {
+    const html = `<a href="https://www.equibase.com/static/chart/pdf/FL060926USA.pdf">PDF</a>`;
+    expect(extractChartPdfUrl(html, BASE)).toBe(
+      "https://www.equibase.com/static/chart/pdf/FL060926USA.pdf",
+    );
+  });
+
+  it("returns null when no .pdf link is present", () => {
+    expect(extractChartPdfUrl("<html>no pdf here</html>", BASE)).toBeNull();
   });
 });
 
