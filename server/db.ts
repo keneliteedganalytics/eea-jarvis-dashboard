@@ -106,6 +106,10 @@ CREATE TABLE IF NOT EXISTS bet_legs (
   payout REAL,
   hit INTEGER,
   flags_json TEXT NOT NULL DEFAULT '[]',
+  refunded INTEGER NOT NULL DEFAULT 0,
+  scratched_at TEXT,
+  combo TEXT,
+  bet_subtype TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_bet_legs_race ON bet_legs(race_id);
@@ -509,6 +513,10 @@ addCardCol("archived_at", "archived_at TEXT");
 // PR #40: bet-structure version. Existing cards predate the budgeted allocator,
 // so they default to 1 (legacy flat builder) and keep their bets AS-IS. New
 // cards are inserted explicitly with version 2 (BudgetedBetBuilder).
+// PR #46: existing cards keep their old default via ALTER (still 1 for legacy
+// historicals). New cards created via Drizzle pick up the v3 default in the
+// schema. The ALTER below is idempotent and never demotes an already-versioned
+// card.
 addCardCol("bet_budget_version", "bet_budget_version INTEGER NOT NULL DEFAULT 1");
 // PR #41: card completion lock-out timestamp (status flips to 'completed').
 addCardCol("completed_at", "completed_at TEXT");
@@ -544,6 +552,14 @@ if (!betLegsCols.has("refunded")) {
 }
 if (!betLegsCols.has("scratched_at")) {
   sqlite.exec("ALTER TABLE bet_legs ADD COLUMN scratched_at TEXT");
+}
+// PR #46 — multi-leg exacta-led bets. combo is a JSON array of pgm strings;
+// bet_subtype is STRAIGHT/BOX/KEY/null. Idempotent migration.
+if (!betLegsCols.has("combo")) {
+  sqlite.exec("ALTER TABLE bet_legs ADD COLUMN combo TEXT");
+}
+if (!betLegsCols.has("bet_subtype")) {
+  sqlite.exec("ALTER TABLE bet_legs ADD COLUMN bet_subtype TEXT");
 }
 
 // Idempotent results-column migration for PR #40: per-race win odds at post.
