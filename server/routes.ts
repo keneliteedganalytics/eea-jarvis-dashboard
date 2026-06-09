@@ -41,6 +41,7 @@ import { startWeatherCron } from "./services/weather-cron";
 import { startScratchRefreshCron } from "./services/scratch-refresh-cron";
 import { refreshScratchesForCard, isScratchRefreshError } from "./services/scratch-refresh";
 import { brisnetAdminRouter } from "./routes/brisnet";
+import { manualIngestRouter } from "./routes/manual-ingest";
 import { runOnDemandIngest } from "./services/on-demand-ingest";
 import {
   runDeepPostmortem,
@@ -617,6 +618,11 @@ export async function registerRoutes(
 
   // ── Brisnet DRM ingest admin (behind global basic auth) ───────────────────
   app.use("/api/admin/brisnet", brisnetAdminRouter());
+
+  // ── Manual PDF drop ingest (PR #33) ───────────────────────────────────────
+  // POST /api/cards/manual-ingest — drop Brisnet (+ optional Equibase) PPs PDFs
+  // for a track+date, run the analyze-card pipeline, land a draft card.
+  app.use("/api/cards", manualIngestRouter());
 
   // ── Voices proxy ─────────────────────────────────────────────────────────
   app.get("/api/voices", async (_req, res) => {
