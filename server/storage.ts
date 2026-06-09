@@ -866,7 +866,7 @@ export class DatabaseStorage implements IStorage {
     const card = this.getCard(cardId);
     if (!card) return undefined;
     db.update(cards)
-      .set({ status: "active", completedAt: null })
+      .set({ status: "active", completedAt: null, locked: false })
       .where(eq(cards.id, cardId))
       .run();
     return this.getCard(cardId);

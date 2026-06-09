@@ -52,6 +52,7 @@ import {
   getDeepPostmortem,
 } from "./services/deep-postmortem";
 import { runFusionReplay, runFusionReplayToday } from "./services/fusion-replay";
+import { adminPinGate } from "./middleware/admin-pin";
 
 // Body schema for POST /api/cards/on-demand-ingest. Track is fuzzy-resolved
 // server-side; date is validated there too (this only enforces presence/shape).
@@ -95,6 +96,11 @@ export async function registerRoutes(
   // 15-min scratch refresh for locked cards during racing hours (PR #20). Reads
   // each card's stored source roster and flags missing horses as scratched.
   startScratchRefreshCron();
+
+  // PR #43: gate every mutating /api request behind the admin PIN. Registered
+  // before any app.post/put/patch/delete so all of them inherit it; GET
+  // requests and the websocket upgrade are unaffected.
+  app.use("/api", adminPinGate);
 
   // ── Cards ────────────────────────────────────────────────────────────────
   // Default to active cards only so the main dashboard never shows past cards.
