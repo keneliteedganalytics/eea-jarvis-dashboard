@@ -64,7 +64,13 @@ const EQUIBASE_LOGIN_URL =
   "https://www.equibase.com/premium/eebCustomerLogon.cfm";
 
 function debugLog(opts: AcquireOpts | undefined, ...args: unknown[]): void {
-  if (opts?.debug) console.log("[browser-session]", ...args);
+  if (
+    opts?.debug ||
+    process.env.BRISNET_DEBUG === "1" ||
+    process.env.EQUIBASE_DEBUG === "1"
+  ) {
+    console.log("[browser-session]", ...args);
+  }
 }
 
 // Akamai (Brisnet) and Imperva (Equibase) both score input cadence — instant
@@ -201,7 +207,8 @@ export async function acquireBrisnetSession(
          the real success gate */
     });
 
-    const onLoginPage = /\/product\/login/i.test(page.url());
+    const finalUrl = page.url();
+    const onLoginPage = /\/product\/login/i.test(finalUrl);
     const hasLogout =
       (await page
         .locator(
@@ -212,10 +219,35 @@ export async function acquireBrisnetSession(
     const hasAccountName =
       username.length > 0 &&
       (await page.locator(`text=${username}`).count().catch(() => 0)) > 0;
-    if (onLoginPage || !(hasLogout || hasAccountName)) {
+
+    // Capture page-visible error text if any — most React SPAs render server
+    // validation errors into a div with role=alert or class containing "error".
+    const errorText = await page
+      .locator(
+        '[role="alert"], .error, .alert, [class*="error" i], [class*="invalid" i]',
+      )
+      .first()
+      .innerText({ timeout: 1_000 })
+      .catch(() => "");
+
+    debugLog(opts, "brisnet post-submit", {
+      finalUrl,
+      onLoginPage,
+      hasLogout,
+      hasAccountName,
+      errorText: errorText.slice(0, 200),
+    });
+
+    if (onLoginPage) {
       throw new Error(
-        "Brisnet login did not reach an authenticated page (still on /product/login " +
-          "or no account/logout marker; credentials rejected or Akamai challenge tightened)",
+        `Brisnet login form re-rendered without navigating — credentials rejected ` +
+          `or validation error. URL=${finalUrl}. Page error: ${errorText || "(none)"}`,
+      );
+    }
+    if (!hasLogout && !hasAccountName) {
+      throw new Error(
+        `Brisnet navigated off /product/login but no logout/account marker found. ` +
+          `URL=${finalUrl}. Selector may be stale — capture HTML via BRISNET_DEBUG=1.`,
       );
     }
 
@@ -237,6 +269,42 @@ export async function acquireEquibaseSession(
     const page = await context.newPage();
     debugLog(opts, "equibase: navigating to login");
     await page.goto(EQUIBASE_LOGIN_URL, { waitUntil: "domcontentloaded" });
+
+    // Usercentrics CMP overlay (#uniccmp) intercepts pointer events on the
+    // login form. Accept it before interacting with the form. The banner is
+    // optional (returning users may not see it on Chromium first run? — debug
+    // telemetry will show), so we tolerate it not appearing.
+    try {
+      // The banner renders inside #uniccmp; the accept button has stable text.
+      const acceptBtn = page
+        .locator(
+          '#uniccmp button:has-text("Accept All"), ' +
+            '#uniccmp button:has-text("Accept"), ' +
+            '#uniccmp button:has-text("I Accept"), ' +
+            '#uniccmp button:has-text("OK"), ' +
+            '#uniccmp button:has-text("Agree"), ' +
+            '#uniccmp button:has-text("Got it"), ' +
+            '#uniccmp button[data-testid*="accept" i]',
+        )
+        .first();
+      await acceptBtn.waitFor({ state: "visible", timeout: 5_000 });
+      debugLog(opts, "equibase: dismissing Usercentrics consent banner");
+      await acceptBtn.click({ timeout: 5_000 });
+      // After click the banner should detach; wait for it to go away.
+      await page
+        .locator("#uniccmp")
+        .waitFor({ state: "detached", timeout: 5_000 })
+        .catch(() => {
+          /* some CMPs hide rather than detach; if it's still in DOM but no longer
+             intercepting pointer events, the next click will succeed regardless */
+        });
+    } catch (e) {
+      debugLog(
+        opts,
+        "equibase: no Usercentrics banner found within 5s (already dismissed or different CMP variant)",
+        (e as Error).message,
+      );
+    }
 
     const userField = page
       .locator('input[name="user_id"], input#user_id')

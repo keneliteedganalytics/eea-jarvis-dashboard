@@ -15,6 +15,12 @@ interface FakeState {
   clicked: boolean;
   waitForSelectorCalled: boolean;
   gotoWaitUntil?: string;
+  // Equibase Usercentrics (#uniccmp) consent banner present? When true the
+  // accept button waitFor({visible}) resolves and a click is recorded.
+  uniccmpPresent: boolean;
+  uniccmpAccepted: boolean;
+  // Page-visible validation error text (Brisnet rich-diagnostics path).
+  errorText: string;
 }
 
 const state: FakeState = {
@@ -26,9 +32,18 @@ const state: FakeState = {
   filled: {},
   clicked: false,
   waitForSelectorCalled: false,
+  uniccmpPresent: false,
+  uniccmpAccepted: false,
+  errorText: "",
 };
 
 function makeLocator(selector: string) {
+  const isUniccmpAccept = selector.includes("#uniccmp");
+  const isUniccmpRoot = selector === "#uniccmp";
+  const isErrorText =
+    /role="alert"|\.error|\.alert|class\*="error"|class\*="invalid"/i.test(
+      selector,
+    );
   return {
     first() {
       return this;
@@ -37,7 +52,34 @@ function makeLocator(selector: string) {
       state.filled[selector] = value;
     },
     async click() {
+      if (isUniccmpAccept) {
+        state.uniccmpAccepted = true;
+        return;
+      }
       state.clicked = true;
+    },
+    async waitFor(options?: { state?: string; timeout?: number }) {
+      // #uniccmp accept button: visible only when the banner is present.
+      if (isUniccmpAccept) {
+        if (!state.uniccmpPresent) {
+          throw new Error("waitFor visible timeout: #uniccmp accept not found");
+        }
+        return;
+      }
+      // #uniccmp root waiting to detach: once accepted it detaches.
+      if (isUniccmpRoot && options?.state === "detached") {
+        return;
+      }
+      return;
+    },
+    async innerText(_options?: { timeout?: number }) {
+      if (isErrorText) {
+        if (!state.errorText) {
+          throw new Error("innerText timeout: no error element");
+        }
+        return state.errorText;
+      }
+      return "";
     },
     async count() {
       // Logout/account markers
@@ -120,6 +162,9 @@ function resetState(overrides: Partial<FakeState> = {}) {
   state.clicked = false;
   state.waitForSelectorCalled = false;
   state.gotoWaitUntil = undefined;
+  state.uniccmpPresent = false;
+  state.uniccmpAccepted = false;
+  state.errorText = "";
   Object.assign(state, overrides);
 }
 
@@ -225,14 +270,39 @@ describe("acquireBrisnetSession", () => {
     expect(arg.args).toContain("--disable-dev-shm-usage");
   });
 
-  it("throws (and still closes) when still on the login page with no logout marker", async () => {
+  it("throws the re-rendered-form error (and still closes) when still on the login page", async () => {
     resetState({
       cookies: [],
       urlAfterSubmit: "https://www.brisnet.com/product/login",
       logoutCount: 0,
     });
     await expect(acquireBrisnetSession("u", "bad")).rejects.toThrow(
-      /did not reach an authenticated page/,
+      /login form re-rendered without navigating/,
+    );
+    expect(state.closed).toBe(true);
+  });
+
+  it("surfaces page-visible validation error text in the re-rendered-form error", async () => {
+    resetState({
+      cookies: [],
+      urlAfterSubmit: "https://www.brisnet.com/product/login",
+      logoutCount: 0,
+      errorText: "Invalid username or password",
+    });
+    await expect(acquireBrisnetSession("u", "bad")).rejects.toThrow(
+      /Page error: Invalid username or password/,
+    );
+    expect(state.closed).toBe(true);
+  });
+
+  it("throws the stale-marker error when navigated off login but no logout/account marker", async () => {
+    resetState({
+      cookies: [],
+      urlAfterSubmit: "https://www.brisnet.com/product/",
+      logoutCount: 0, // navigated away, but no marker and account name absent
+    });
+    await expect(acquireBrisnetSession("", "p")).rejects.toThrow(
+      /no logout\/account marker found/,
     );
     expect(state.closed).toBe(true);
   });
@@ -291,5 +361,34 @@ describe("acquireEquibaseSession", () => {
     await expect(acquireEquibaseSession("u", "bad")).rejects.toThrow(
       /did not reach an authenticated page/,
     );
+  });
+
+  it("dismisses the Usercentrics (#uniccmp) consent banner when present", async () => {
+    resetState({
+      cookies: [COOKIE({ name: "CFID", value: "55", domain: ".equibase.com" })],
+      urlAfterSubmit: "https://www.equibase.com/premium/eqpEquibaseFullPP.cfm",
+      logoutCount: 1,
+      uniccmpPresent: true,
+    });
+    const session = await acquireEquibaseSession("Ken6741", "pw");
+    expect(session.provider).toBe("equibase");
+    // The accept button was clicked before the form submit succeeded.
+    expect(state.uniccmpAccepted).toBe(true);
+    // Login still proceeded (credentials filled, submit clicked).
+    expect(state.clicked).toBe(true);
+  });
+
+  it("tolerates the consent banner being absent (try/catch path)", async () => {
+    resetState({
+      cookies: [COOKIE({ name: "CFID", value: "55", domain: ".equibase.com" })],
+      urlAfterSubmit: "https://www.equibase.com/premium/eqpEquibaseFullPP.cfm",
+      logoutCount: 1,
+      uniccmpPresent: false,
+    });
+    const session = await acquireEquibaseSession("Ken6741", "pw");
+    expect(session.provider).toBe("equibase");
+    // No banner -> accept never clicked, but login still proceeds.
+    expect(state.uniccmpAccepted).toBe(false);
+    expect(state.clicked).toBe(true);
   });
 });
