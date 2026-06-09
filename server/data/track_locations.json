@@ -25,6 +25,8 @@
   "OP": { "name": "Oaklawn Park", "lat": 34.5037, "lon": -93.0524, "tz": "America/Chicago" },
   "Oaklawn": { "name": "Oaklawn Park", "lat": 34.5037, "lon": -93.0524, "tz": "America/Chicago" },
   "Oaklawn Park": { "name": "Oaklawn Park", "lat": 34.5037, "lon": -93.0524, "tz": "America/Chicago" },
+  "ASD": { "name": "Assiniboia Downs", "lat": 49.8951, "lon": -97.2466, "tz": "America/Winnipeg" },
+  "Assiniboia Downs": { "name": "Assiniboia Downs", "lat": 49.8951, "lon": -97.2466, "tz": "America/Winnipeg" },
   "PRX": { "name": "Parx Racing", "lat": 40.1146, "lon": -74.9569, "tz": "America/New_York" },
   "Parx Racing": { "name": "Parx Racing", "lat": 40.1146, "lon": -74.9569, "tz": "America/New_York" },
   "LRL": { "name": "Laurel Park", "lat": 39.1043, "lon": -76.8633, "tz": "America/New_York" },

@@ -25,6 +25,7 @@ export interface EquibaseRaceResult {
 
 // Kept for any legacy reference; not used by the HRN parser.
 export const TRACK_CODES: Record<string, string> = {
+  "Assiniboia Downs": "ASD",
   Saratoga: "SAR",
   Belmont: "BEL",
   "Belmont at the Big A": "BAQ",
@@ -39,6 +40,7 @@ export const TRACK_CODES: Record<string, string> = {
 
 // Track name -> HRN URL slug.
 export const TRACK_SLUGS: Record<string, string> = {
+  "Assiniboia Downs": "assiniboia-downs",
   Saratoga: "saratoga",
   Belmont: "belmont",
   "Belmont at the Big A": "aqueduct",

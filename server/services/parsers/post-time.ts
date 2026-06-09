@@ -52,6 +52,8 @@ const TRACK_ZONES: Record<string, string> = {
   ls: "America/Chicago",
   canterbury: "America/Chicago",
   cby: "America/Chicago",
+  "assiniboia downs": "America/Winnipeg",
+  asd: "America/Winnipeg",
   // Mountain
   "sunray park": "America/Denver",
   "sun": "America/Denver",
