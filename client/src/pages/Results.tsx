@@ -1,14 +1,35 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useState } from "react";
-import type { CardWithRaces, RaceWithResult, Settings } from "@shared/schema";
+import { useEffect, useState } from "react";
+import type { Card, CardWithRaces, RaceWithResult, Settings } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { TierPill } from "@/components/brand/TierPill";
 import { useJarvis } from "@/lib/jarvis";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Volume2, Mic, Check, X } from "lucide-react";
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// Read ?cardId=N off the hash-router URL (e.g. "#/results?cardId=4"). Wouter's
+// hash location keeps the query on the hash, so window.location.search is empty.
+function cardIdFromHash(): number | null {
+  const hash = window.location.hash;
+  const q = hash.indexOf("?");
+  if (q === -1) return null;
+  const id = Number(new URLSearchParams(hash.slice(q + 1)).get("cardId"));
+  return Number.isFinite(id) && id > 0 ? id : null;
+}
 
 function pct(n: number, d: number): string {
   if (d === 0) return "—";
@@ -74,7 +95,11 @@ function ResultEntry({ race, autoRecap }: { race: RaceWithResult; autoRecap: boo
       return finishOrder;
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] }),
+        queryClient.invalidateQueries({ queryKey: [`/api/cards/${race.cardId}`] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/stats/lifetime"] }),
+      ]);
       toast({ title: `Race ${race.raceNumber} graded`, description: "Result logged." });
       if (autoRecap) {
         jarvis.briefViaPost(`/api/jarvis/recap-race/${race.id}`, `Race ${race.raceNumber} recap`);
@@ -147,14 +172,63 @@ function ResultEntry({ race, autoRecap }: { race: RaceWithResult; autoRecap: boo
 }
 
 export default function Results() {
-  const { data: card, isLoading } = useQuery<CardWithRaces>({ queryKey: ["/api/cards/latest"] });
   const { data: settings } = useQuery<Settings>({ queryKey: ["/api/settings"] });
   const { data: lifetime } = useQuery<LifetimeStats>({ queryKey: ["/api/stats/lifetime"] });
   const jarvis = useJarvis();
 
+  // All non-archived cards (active "today" cards + draft/historical manual-ingest
+  // cards). Newest date first so the default selection is the most recent card.
+  const { data: cardList, isLoading: cardsLoading } = useQuery<Card[]>({ queryKey: ["/api/cards"] });
+  const cards = [...(cardList ?? [])].sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  // Selected card id. Initialised from ?cardId=N (set by "Enter Results"), else
+  // null — meaning "use the default" (today's card, falling back to most recent).
+  const [selectedId, setSelectedId] = useState<number | null>(() => cardIdFromHash());
+
+  // Resolve the effective id once the list loads. Prefer an explicit selection,
+  // then today's card, then the most recent card.
+  const today = todayIso();
+  const defaultCard = cards.find((c) => c.date === today) ?? cards[0];
+  const effectiveId =
+    (selectedId != null && cards.some((c) => c.id === selectedId) ? selectedId : null) ??
+    defaultCard?.id ??
+    null;
+
+  const { data: card, isLoading } = useQuery<CardWithRaces>({
+    queryKey: [`/api/cards/${effectiveId}`],
+    enabled: effectiveId != null,
+  });
+
+  // Keep the dropdown in sync if the hash changes while mounted (e.g. arriving
+  // from the Manual Ingest modal without a full remount).
+  useEffect(() => {
+    const onHash = () => {
+      const id = cardIdFromHash();
+      if (id != null) setSelectedId(id);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  if (!cardsLoading && effectiveId == null && (cardList?.length ?? 0) === 0) {
+    return (
+      <div className="p-6">
+        <h1 className="text-xl font-display font-black text-silver">Scorecard</h1>
+        <div className="mt-4 rounded-lg border border-gold/10 bg-navy-card p-6 text-center text-sm text-muted-brand">
+          No cards yet. Ingest a card to start grading.
+        </div>
+      </div>
+    );
+  }
+
   if (isLoading || !card) {
     return <div className="p-6 space-y-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}</div>;
   }
+
+  const isToday = card.date === today;
+  const title = isToday ? "Today's Scorecard" : `${card.track} — ${card.date}`;
+  const cardStatus = (c: Card): string =>
+    c.status === "archived" ? "archived" : c.locked ? "active" : "draft";
 
   const races = card.races ?? [];
   const withResults = races.filter((r) => r.result);
@@ -184,8 +258,34 @@ export default function Results() {
 
   return (
     <div className="p-4 sm:p-6 max-w-[1400px] mx-auto pb-28">
+      {cards.length > 0 && (
+        <div className="mb-3 max-w-md">
+          <Select
+            value={String(card.id)}
+            onValueChange={(v) => setSelectedId(Number(v))}
+          >
+            <SelectTrigger
+              className="bg-navy-section border-gold/15 text-silver"
+              data-testid="results-card-picker"
+            >
+              <SelectValue placeholder="Select a card" />
+            </SelectTrigger>
+            <SelectContent>
+              {cards.map((c) => {
+                const races = c.id === card.id ? card.races?.length ?? 0 : undefined;
+                const racesLabel = races === undefined ? "" : `${races} race${races === 1 ? "" : "s"}, `;
+                return (
+                  <SelectItem key={c.id} value={String(c.id)} data-testid={`results-card-option-${c.id}`}>
+                    {c.track} — {c.date} ({racesLabel}{cardStatus(c)})
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-xl font-display font-black text-silver">Today's Scorecard</h1>
+        <h1 className="text-xl font-display font-black text-silver" data-testid="results-title">{title}</h1>
         <Button
           onClick={() => jarvis.briefViaPost(`/api/jarvis/summary-card/${card.id}`, `${card.track} card summary`)}
           className="bg-gold hover:bg-gold-light text-navy-bg font-display font-bold"

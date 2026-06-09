@@ -74,9 +74,9 @@ describe("ManualIngestModal", () => {
     expect((opts.body as FormData).get("track")).toBe("Finger Lakes");
     expect((opts.body as FormData).get("brisnetPdf")).toBeInstanceOf(File);
 
-    // "Enter Results" routes to the scorecard.
+    // "Enter Results" routes to the scorecard with the new card pre-selected.
     fireEvent.click(screen.getByTestId("manual-go-results"));
-    expect(navigate).toHaveBeenCalledWith("/results");
+    expect(navigate).toHaveBeenCalledWith("/results?cardId=7");
   });
 
   it("includes the optional Equibase file when one is selected", async () => {
