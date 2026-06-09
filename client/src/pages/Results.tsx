@@ -176,9 +176,14 @@ export default function Results() {
   const { data: lifetime } = useQuery<LifetimeStats>({ queryKey: ["/api/stats/lifetime"] });
   const jarvis = useJarvis();
 
-  // All non-archived cards (active "today" cards + draft/historical manual-ingest
-  // cards). Newest date first so the default selection is the most recent card.
-  const { data: cardList, isLoading: cardsLoading } = useQuery<Card[]>({ queryKey: ["/api/cards"] });
+  // ALL cards across every status — active "today" cards, draft/historical
+  // manual-ingest cards, and archived cards. Archived cards are auto-archived
+  // past-date cards the user still needs to grade for backtesting, so the
+  // Results picker must surface them. Newest date first so the default
+  // selection is the most recent card.
+  const { data: cardList, isLoading: cardsLoading } = useQuery<Card[]>({
+    queryKey: ["/api/cards?includeArchived=true"],
+  });
   const cards = [...(cardList ?? [])].sort((a, b) => (a.date < b.date ? 1 : -1));
 
   // Selected card id. Initialised from ?cardId=N (set by "Enter Results"), else
