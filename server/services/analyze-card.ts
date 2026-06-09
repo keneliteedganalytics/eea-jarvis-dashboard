@@ -59,16 +59,42 @@ function loadHandoffConfig(provider?: "anthropic" | "poe"): HandoffConfig {
   };
 }
 
-function loadWeights(): EeaWeights {
-  const active = storage.getActiveFormulaVersion();
-  if (active?.weightsJson) {
-    try {
-      return JSON.parse(active.weightsJson) as EeaWeights;
-    } catch {
-      /* fall through */
+// Deep-merge the stored weights JSON on top of DEFAULT_WEIGHTS so a row written
+// by an older schema (missing whole sub-objects like `bloodstock`) never yields
+// an undefined sub-object downstream. Every top-level DEFAULT_WEIGHTS key is
+// guaranteed present; sub-objects are spread-merged one level deep so the user's
+// persisted leaf overrides win, but missing leaves fall back to the default.
+export function deepMergeWeights(
+  base: EeaWeights,
+  override: Partial<EeaWeights>,
+): EeaWeights {
+  const out: any = { ...base };
+  for (const key of Object.keys(override) as (keyof EeaWeights)[]) {
+    const baseVal = (base as any)[key];
+    const overrideVal = (override as any)[key];
+    if (
+      baseVal && typeof baseVal === "object" && !Array.isArray(baseVal) &&
+      overrideVal && typeof overrideVal === "object" && !Array.isArray(overrideVal)
+    ) {
+      out[key] = { ...baseVal, ...overrideVal };
+    } else if (overrideVal !== undefined && overrideVal !== null) {
+      out[key] = overrideVal;
     }
   }
-  return DEFAULT_WEIGHTS;
+  return out as EeaWeights;
+}
+
+function loadWeights(): EeaWeights {
+  const active = storage.getActiveFormulaVersion();
+  let stored: Partial<EeaWeights> = {};
+  if (active?.weightsJson) {
+    try {
+      stored = JSON.parse(active.weightsJson) as Partial<EeaWeights>;
+    } catch {
+      /* corrupt JSON → fall back to pure defaults */
+    }
+  }
+  return deepMergeWeights(DEFAULT_WEIGHTS, stored);
 }
 
 // Build the flattened race-row picks from the LLM's ranked top4.
