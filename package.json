@@ -11,7 +11,8 @@
     "test": "vitest run",
     "db:push": "drizzle-kit push",
     "smoke:ingest-brisnet": "tsx scripts/smoke_ingest_brisnet.ts",
-    "smoke:ingest-equibase": "tsx scripts/smoke_ingest_equibase.ts"
+    "smoke:ingest-equibase": "tsx scripts/smoke_ingest_equibase.ts",
+    "verify:session": "tsx scripts/verify_session.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",

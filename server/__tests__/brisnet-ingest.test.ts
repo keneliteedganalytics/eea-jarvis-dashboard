@@ -79,15 +79,23 @@ describe("CSV + date helpers", () => {
 });
 
 describe("buildDownloadUrl", () => {
-  it("matches the discovered DRM download pattern", () => {
+  // PR #30: confirmed from live recon — lowercase `drm` segment (PR #29 guessed
+  // uppercase DRM and 404'd).
+  it("matches the recon-confirmed DRM download pattern exactly", () => {
     expect(buildDownloadUrl("FL", JUN8)).toBe(
-      "https://www.brisnet.com/product/download/2026-06-08/DRM/USA/TB/FL/D/0/",
+      "https://www.brisnet.com/product/download/2026-06-08/drm/USA/TB/FL/D/0/",
+    );
+  });
+
+  it("returns the exact URL for FL on 2026-06-09 (spec acceptance string)", () => {
+    expect(buildDownloadUrl("FL", new Date(2026, 5, 9))).toBe(
+      "https://www.brisnet.com/product/download/2026-06-09/drm/USA/TB/FL/D/0/",
     );
   });
 
   it("uppercases the track code", () => {
     expect(buildDownloadUrl("alb", JUN8)).toBe(
-      "https://www.brisnet.com/product/download/2026-06-08/DRM/USA/TB/ALB/D/0/",
+      "https://www.brisnet.com/product/download/2026-06-08/drm/USA/TB/ALB/D/0/",
     );
   });
 

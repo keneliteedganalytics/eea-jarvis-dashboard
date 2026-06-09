@@ -13,6 +13,8 @@ interface FakeState {
   closed: boolean;
   filled: Record<string, string>;
   clicked: boolean;
+  waitForSelectorCalled: boolean;
+  gotoWaitUntil?: string;
 }
 
 const state: FakeState = {
@@ -23,6 +25,7 @@ const state: FakeState = {
   closed: false,
   filled: {},
   clicked: false,
+  waitForSelectorCalled: false,
 };
 
 function makeLocator(selector: string) {
@@ -53,8 +56,9 @@ function makeLocator(selector: string) {
 function makePage() {
   let currentUrl = "about:blank";
   return {
-    async goto(url: string) {
+    async goto(url: string, options?: { waitUntil?: string; timeout?: number }) {
       currentUrl = url;
+      if (options?.waitUntil) state.gotoWaitUntil = options.waitUntil;
     },
     url() {
       // After a click, the page is on the post-submit URL.
@@ -64,6 +68,10 @@ function makePage() {
       return makeLocator(selector);
     },
     async waitForLoadState() {
+      /* resolve immediately */
+    },
+    async waitForSelector() {
+      state.waitForSelectorCalled = true;
       /* resolve immediately */
     },
   };
@@ -110,6 +118,8 @@ function resetState(overrides: Partial<FakeState> = {}) {
   state.closed = false;
   state.filled = {};
   state.clicked = false;
+  state.waitForSelectorCalled = false;
+  state.gotoWaitUntil = undefined;
   Object.assign(state, overrides);
 }
 
@@ -177,6 +187,29 @@ describe("acquireBrisnetSession", () => {
     // Credentials were filled into the user + password fields.
     expect(Object.values(state.filled)).toContain("Ken6741");
     expect(Object.values(state.filled)).toContain("pw!");
+  });
+
+  it("navigates with networkidle and waits for the username field before filling (PR #30)", async () => {
+    resetState({
+      cookies: [COOKIE()],
+      urlAfterSubmit: "https://www.brisnet.com/product/",
+      logoutCount: 1,
+    });
+    await acquireBrisnetSession("Ken6741", "pw!");
+    // React SPA: the login nav must use networkidle (not domcontentloaded) so
+    // hydration completes, and we must waitForSelector before filling.
+    expect(state.gotoWaitUntil).toBe("networkidle");
+    expect(state.waitForSelectorCalled).toBe(true);
+  });
+
+  it("succeeds on /product/ when the account name marker is present", async () => {
+    resetState({
+      cookies: [COOKIE()],
+      urlAfterSubmit: "https://www.brisnet.com/product/",
+      logoutCount: 0, // no explicit logout link — rely on the account-name marker
+    });
+    const session = await acquireBrisnetSession("Ken6741", "pw!");
+    expect(session.provider).toBe("brisnet");
   });
 
   it("launches headless with --no-sandbox + --disable-dev-shm-usage", async () => {

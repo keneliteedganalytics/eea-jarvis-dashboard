@@ -60,18 +60,35 @@ Railway will restart the service once when you attach the volume. Normal.
 In the service page, click the **Variables** tab → **+ New Variable** for
 each one below. (Or use **Raw Editor** and paste all at once.)
 
+> ⭐ **`DATABASE_FILE=/data/data.db` is NEWLY REQUIRED (PR #30).** Without it,
+> the DB path defaults to a RELATIVE `data.db` that resolves to `/app/data.db`
+> INSIDE the container image — outside the `/data` volume — so **every deploy
+> wipes all saved cards.** It must point at the persistent `/data` mount.
+
 ```
 NODE_ENV=production
 PORT=5000
 
-DATABASE_FILE=/data/database.db
+# ── Persistence (all under the /data volume) ──────────────────────────────
+DATABASE_FILE=/data/data.db          # ⭐ NEWLY REQUIRED — see warning above
 AUDIO_DIR=/data/audio_cache
 UPLOAD_DIR=/data/uploads
+EQUIBASE_PP_DIR=/data/equibase-pps   # downloaded Equibase PP/chart PDFs
+BRISNET_DRM_DIR=/data/brisnet-drm    # downloaded Brisnet DRM zips
 
+# ── Ingest credentials (live Brisnet + Equibase logins) ───────────────────
+BRISNET_USER=Ken6741
+BRISNET_PASS=Drewbaby11!             # note the trailing '!'
+EQUIBASE_USER=Ken6741
+EQUIBASE_PASS=Drewbaby11             # NO '!'
+
+# ── API keys ──────────────────────────────────────────────────────────────
 ELEVENLABS_API_KEY=<paste your real ElevenLabs key>
 ANTHROPIC_API_KEY=<paste your real Anthropic key>
 POE_API_KEY=<paste your real Poe key>
+OPENWEATHER_API_KEY=<paste your real OpenWeather key>
 
+# ── Basic auth (browser login prompt) ─────────────────────────────────────
 BASIC_AUTH_USER=EliteEdgeAnalytics
 BASIC_AUTH_PASS=Austin08
 ```
@@ -79,6 +96,7 @@ BASIC_AUTH_PASS=Austin08
 After saving, Railway redeploys. You should see the service go green within
 60 seconds. Click **View Logs** to confirm:
 
+- `[db] sqlite path=/data/data.db persisted=true writable=true`
 - `[auth] HTTP basic auth ENABLED for user: EliteEdgeAnalytics`
 - `serving on port 5000`
 

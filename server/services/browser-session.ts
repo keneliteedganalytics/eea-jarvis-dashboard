@@ -141,9 +141,12 @@ async function harvest(
 }
 
 // ── Brisnet ──────────────────────────────────────────────────────────────────
-// Classic HTML form at /product/login: text input[name=Username], password
-// input[name=Password], submit button. Confirmed by 2026-06-08 recon. Success
-// is leaving the login page and exposing a logout/account affordance.
+// React SPA at /product/login (PR #30 recon): the form inputs don't exist in the
+// DOM until hydration, so we wait for `networkidle` and then for the username
+// field to actually render before filling. Login is a JS fetch, not a classic
+// form POST; on success the SPA navigates away from /product/login to
+// /product/. Akamai silently passes a real Chromium. Success marker: no longer
+// on /product/login AND the account name (Ken6741) OR a logout link is present.
 export async function acquireBrisnetSession(
   username: string,
   password: string,
@@ -152,16 +155,26 @@ export async function acquireBrisnetSession(
   return withChromium(opts, async (context) => {
     const page = await context.newPage();
     debugLog(opts, "brisnet: navigating to login");
-    await page.goto(BRISNET_LOGIN_URL, { waitUntil: "domcontentloaded" });
+    await page.goto(BRISNET_LOGIN_URL, {
+      waitUntil: "networkidle",
+      timeout: 30_000,
+    });
+
+    // Wait for the React-rendered username field to exist before filling — on a
+    // domcontentloaded nav the inputs aren't in the DOM yet (PR #29's bug).
+    await page.waitForSelector(
+      'input[type="text"], input[name="username" i], input#username',
+      { timeout: 10_000 },
+    );
 
     const userField = page
       .locator(
-        'input[name="Username" i], input[name="username"], input#username',
+        'input[name="Username" i], input[name="username"], input#username, input[type="text"]',
       )
       .first();
     const passField = page
       .locator(
-        'input[name="Password" i], input[name="password"], input#password',
+        'input[name="Password" i], input[name="password"], input#password, input[type="password"]',
       )
       .first();
 
@@ -195,10 +208,14 @@ export async function acquireBrisnetSession(
           'a[href*="logout" i], a:has-text("Logout"), a:has-text("Log Out"), a:has-text("My Account")',
         )
         .count()) > 0;
-    if (onLoginPage && !hasLogout) {
+    // The authenticated SPA renders the logged-in account name in the header.
+    const hasAccountName =
+      username.length > 0 &&
+      (await page.locator(`text=${username}`).count().catch(() => 0)) > 0;
+    if (onLoginPage || !(hasLogout || hasAccountName)) {
       throw new Error(
-        "Brisnet login did not reach an authenticated page (still on /product/login; " +
-          "credentials rejected or Akamai challenge tightened)",
+        "Brisnet login did not reach an authenticated page (still on /product/login " +
+          "or no account/logout marker; credentials rejected or Akamai challenge tightened)",
       );
     }
 
@@ -260,14 +277,18 @@ export async function acquireEquibaseSession(
       );
     }
 
+    // Recon confirmed a successful login lands on /index.cfm?&logon=Y. Treat
+    // that as the primary success marker; fall back to an account/logout/
+    // welcome affordance for any other authenticated landing page.
+    const onLogonLanding = /logon=y/i.test(page.url());
     const hasLogout =
       (await page
         .locator(
-          'a[href*="Logoff" i], a[href*="logout" i], a:has-text("Logout"), a:has-text("Sign Out"), a:has-text("My Account")',
+          'a[href*="Logoff" i], a[href*="logout" i], a:has-text("Logout"), a:has-text("Sign Out"), a:has-text("My Account"), a:has-text("Welcome")',
         )
         .count()) > 0;
     const onLoginPage = /eebCustomerLogon\.cfm/i.test(page.url());
-    if (onLoginPage && !hasLogout) {
+    if (!onLogonLanding && onLoginPage && !hasLogout) {
       throw new Error(
         "Equibase login did not reach an authenticated page (still on " +
           "eebCustomerLogon.cfm; credentials rejected)",
