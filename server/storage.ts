@@ -60,6 +60,7 @@ import type {
   RaceEventRow,
   CardSummaryRow,
   CardSummaryTier,
+  PassWinMissHorse,
 } from "@shared/schema";
 import type { PedigreeSummary } from "@shared/schema";
 import { db } from "./db";
@@ -115,6 +116,7 @@ export interface IStorage {
   completeCard(cardId: number): CardSummaryRow | undefined;
   unlockCard(cardId: number): Card | undefined;
   getCardSummary(cardId: number): CardSummaryRow | undefined;
+  regradeCard(cardId: number): CardSummaryRow | undefined;
 
   // Settings
   getSettings(): Settings;
@@ -249,7 +251,10 @@ export class DatabaseStorage implements IStorage {
     // (version 1, e.g. Card #4) keep their legacy flat bets AS-IS.
     const useBudgeted = (card.betBudgetVersion ?? 1) >= 2;
     const budgetedByRace: Map<number, BudgetedRaceBets> | null = useBudgeted
-      ? buildBudgetedBets(raceRows, configFromSettings(s))
+      ? buildBudgetedBets(
+          raceRows.map((r) => ({ ...r, fieldSize: this.fieldSizeForRace(r.id) })),
+          configFromSettings(s),
+        )
       : null;
 
     // DRM pedigree names for this card (race#|pgm → sire/dam/dam-sire), used to
@@ -778,7 +783,10 @@ export class DatabaseStorage implements IStorage {
     const s = this.getSettings();
     let bets: BudgetedRaceBets | undefined;
     if ((betBudgetVersion ?? 1) >= 2) {
-      bets = buildBudgetedBets([race], configFromSettings(s)).get(raceId);
+      bets = buildBudgetedBets(
+        [{ ...race, fieldSize: this.fieldSizeForRace(raceId) }],
+        configFromSettings(s),
+      ).get(raceId);
     } else {
       const racesOnCard = this.getRacesByCard(cardId).length;
       bets = buildWagers(
@@ -835,6 +843,22 @@ export class DatabaseStorage implements IStorage {
     return this.computeCardSummary(cardId);
   }
 
+  // PR #42 — re-grade a card under the CURRENT model. Rebuilds every race's
+  // bet_legs ledger (so a betBudgetVersion>=2 card picks up the recalibrated
+  // tier weights and the Maiden-Claim EX-only gate) and re-reconciles each
+  // against its stored result, then refreezes card_summaries (recomputing
+  // ROI + the PASS-WIN MISS columns). Idempotent: old live legs are refunded,
+  // not deleted, so the audit trail and ROI math stay correct on repeated runs.
+  regradeCard(cardId: number): CardSummaryRow | undefined {
+    const card = this.getCard(cardId);
+    if (!card) return undefined;
+    const version = card.betBudgetVersion ?? 1;
+    for (const race of this.getRacesByCard(cardId)) {
+      this.rebuildRaceLedger(cardId, race.id, version);
+    }
+    return this.completeCard(cardId);
+  }
+
   // Re-enable editing on a completed card (Settings admin escape hatch). Returns
   // the card to "active"; the frozen card_summaries row is left in place until
   // the card is completed again (which recomputes it).
@@ -888,6 +912,8 @@ export class DatabaseStorage implements IStorage {
       roi: t.cost > 0 ? Math.round(((t.payout - t.cost) / t.cost) * 1000) / 10 : null,
     }));
 
+    const passWinMisses = this.detectPassWinMisses(raceRows);
+
     const row = {
       cardId,
       totalCost: Math.round(totalCost * 100) / 100,
@@ -896,6 +922,8 @@ export class DatabaseStorage implements IStorage {
       winRate,
       itmRate,
       tierBreakdownJson: JSON.stringify(tierBreakdown),
+      passWinMissCount: passWinMisses.length,
+      passWinMissHorses: JSON.stringify(passWinMisses),
       computedAt: new Date().toISOString(),
     };
     db.insert(cardSummaries)
@@ -903,6 +931,52 @@ export class DatabaseStorage implements IStorage {
       .onConflictDoUpdate({ target: cardSummaries.cardId, set: row })
       .run();
     return db.select().from(cardSummaries).where(eq(cardSummaries.cardId, cardId)).get()!;
+  }
+
+  // PR #42 — PASS-WIN MISS detection. For each graded PASS race, check whether
+  // the actual winner was on our board grid (i.e. we ranked/tiered it — it has a
+  // prediction row for the race). A winner we had on the board but tiered PASS is
+  // a miss: the model saw the horse and waved it off. Winners we never rated
+  // (not in our pool) are NOT misses — there was nothing to pass on.
+  private detectPassWinMisses(raceRows: Race[]): PassWinMissHorse[] {
+    const misses: PassWinMissHorse[] = [];
+    for (const race of raceRows) {
+      if (race.tier !== "PASS") continue;
+      const result = this.getResultByRace(race.id);
+      if (!result) continue;
+      const finish = parseStringArrayField(result.finishOrder);
+      const winnerPgm = finish[0];
+      if (!winnerPgm) continue;
+
+      // Board grid = the runners we rated for this race (prediction rows). The
+      // winner's prediction also tells us the conviction tier we gave it and its
+      // ML odds. No prediction → winner was off our board → not a miss.
+      const preds = this.getPredictionsByRace(race.id);
+      const winnerPred = preds.find((p) => p.horsePgm === winnerPgm);
+      if (!winnerPred) continue;
+
+      misses.push({
+        raceNumber: race.raceNumber,
+        horseNumber: winnerPgm,
+        name: winnerPred.horseName ?? null,
+        ourTier: winnerPred.tierAssigned ?? "PASS",
+        mlOdds: this.mlOddsForPrediction(winnerPred),
+      });
+    }
+    return misses;
+  }
+
+  // Best-effort ML odds for a prediction: the bias context JSON occasionally
+  // carries the parsed morning line; absent that, null. Kept defensive so a
+  // malformed blob never breaks card completion.
+  private mlOddsForPrediction(pred: Prediction): number | null {
+    if (!pred.biasContextJson) return null;
+    try {
+      const j = JSON.parse(pred.biasContextJson) as { mlOdds?: number | null };
+      return typeof j.mlOdds === "number" ? j.mlOdds : null;
+    } catch {
+      return null;
+    }
   }
 
   // ── Daily Show ──────────────────────────────────────────────────────────
@@ -1055,6 +1129,13 @@ export class DatabaseStorage implements IStorage {
       .from(predictions)
       .all()
       .filter((p) => ids.has(p.raceId));
+  }
+
+  // PR #42 — live entrant count for the Maiden Claim 9+ EX-only gate. There is
+  // no horses table; the field is the set of non-scratched predictions for the
+  // race. Manual-ingest cards with no predictions return 0 (gate never fires).
+  private fieldSizeForRace(raceId: number): number {
+    return this.getPredictionsByRace(raceId).filter((p) => !p.scratched).length;
   }
 
   deletePredictionsByCard(cardId: number): void {

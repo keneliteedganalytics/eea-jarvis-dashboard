@@ -167,6 +167,11 @@ export const cardSummaries = sqliteTable("card_summaries", {
   winRate: real("win_rate"), // % of graded races where WIN pick hit
   itmRate: real("itm_rate"), // % of graded pick slots that finished ITM
   tierBreakdownJson: text("tier_breakdown_json").notNull().default("{}"),
+  // PR #42 — PASS-WIN MISS tracking. A "miss" is a PASS race whose actual winner
+  // was on our board grid (i.e. appeared in our tiering output) but tiered PASS.
+  // count is the number of such races; horses is the JSON detail list.
+  passWinMissCount: integer("pass_win_miss_count").notNull().default(0),
+  passWinMissHorses: text("pass_win_miss_horses").notNull().default("[]"), // JSON array
   computedAt: text("computed_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -179,6 +184,16 @@ export interface CardSummaryTier {
   payout: number;
   roi: number | null;
   legs: number;
+}
+
+// PR #42 — one entry inside cardSummaries.passWinMissHorses. The winner of a
+// PASS race that was nonetheless on our board grid.
+export interface PassWinMissHorse {
+  raceNumber: number;
+  horseNumber: string; // winning program number
+  name: string | null;
+  ourTier: string; // the tier we assigned the winner (PASS, RECON, ...)
+  mlOdds: number | null;
 }
 
 // ── Weather per race (PR #18) ─────────────────────────────────────────────
@@ -248,8 +263,10 @@ export const settings = sqliteTable("settings", {
   // demote one step. "aggressive": RECON→PASS too.
   chaosDemotionMode: text("chaos_demotion_mode").notNull().default("floor-recon"),
   // Per-tier card-budget weights. JSON: { SNIPER, EDGE, DUAL, RECON, PASS }.
+  // PR #42 recal: EDGE 18→25, DUAL 10→6 (postmortem of Cards #4/#8 — EDGE
+  // 67% WIN / 100% ITM was underfunded, DUAL 25% WIN was overfunded).
   tierWeightsJson: text("tier_weights_json").notNull().default(
-    '{"SNIPER":30,"EDGE":18,"DUAL":10,"RECON":4,"PASS":0}',
+    '{"SNIPER":30,"EDGE":25,"DUAL":6,"RECON":4,"PASS":0}',
   ),
   // Per-tier leg-pattern percentages of the race budget. JSON keyed by tier,
   // each value { win, place, show, exacta, trifecta, superfecta }.
@@ -584,12 +601,14 @@ export interface RaceWagerLeg {
   structure: string;
   horses: string[];
   cost: number;
+  gates?: string[]; // PR #42: bet-type gates that shaped this leg
 }
 export interface RaceWagers {
   tier: string;
   raceAllocation: number;
   pass: boolean;
   legs: RaceWagerLeg[];
+  gates?: string[]; // PR #42: race-level bet-type gates that fired
 }
 
 // ── Weather (PR #18) ───────────────────────────────────────────────────────
