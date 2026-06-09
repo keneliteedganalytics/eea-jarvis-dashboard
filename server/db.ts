@@ -121,6 +121,20 @@ CREATE TABLE IF NOT EXISTS race_events (
 );
 CREATE INDEX IF NOT EXISTS idx_race_events_race ON race_events(race_id);
 
+-- Bankroll ledger (PR #44). Append-only per-card money ledger; seeded with a
+-- +$1000 card-start event on create, appended on each race grade.
+CREATE TABLE IF NOT EXISTS bankroll_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  race_id INTEGER REFERENCES races(id) ON DELETE CASCADE,
+  source TEXT NOT NULL,
+  delta REAL NOT NULL,
+  running_balance REAL NOT NULL,
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_bankroll_cardId ON bankroll_events(card_id);
+
 -- Card summaries (PR #41). Frozen per-card ROI roll-up, written on completion.
 CREATE TABLE IF NOT EXISTS card_summaries (
   card_id INTEGER PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,

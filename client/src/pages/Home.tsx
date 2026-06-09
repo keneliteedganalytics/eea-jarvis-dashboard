@@ -16,6 +16,31 @@ import { DraftCardsSection } from "@/components/DraftCardsSection";
 import { PullCardModal } from "@/components/PullCardModal";
 import { ManualIngestModal } from "@/components/ManualIngestModal";
 
+// PR #44: per-card running bankroll. Color-coded: green > 1000, amber 600–1000,
+// red < 600. Polls the ledger; refreshed live by the race-graded SSE event.
+function BankrollPill({ cardId }: { cardId: number }) {
+  const { data } = useQuery<{ balance: number }>({
+    queryKey: ["/api/cards", String(cardId), "bankroll"],
+  });
+  if (!data) return null;
+  const bal = data.balance;
+  const tone =
+    bal > 1000
+      ? "border-win/40 bg-win/10 text-win"
+      : bal >= 600
+        ? "border-gold/40 bg-gold/10 text-gold"
+        : "border-loss/40 bg-loss/10 text-loss";
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-display font-bold tabular-nums ${tone}`}
+      data-testid="pill-bankroll"
+      title="Card bankroll ($1,000 starting)"
+    >
+      BANKROLL ${bal.toFixed(2)}
+    </span>
+  );
+}
+
 function StatBox({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
   return (
     <div className="rounded-md border border-gold/10 bg-navy-card px-3 py-2.5 text-center">
@@ -118,6 +143,7 @@ export default function Home() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <BankrollPill cardId={card.id} />
             <Button
               onClick={() => jarvis.briefViaPost("/api/jarvis/brief-card", `${card.track} card briefing`)}
               className="bg-gold hover:bg-gold-light text-navy-bg font-display font-bold tracking-wide"
