@@ -30,6 +30,9 @@ import {
   getDeepPostmortem,
 } from "./deep-postmortem";
 import { runFusionReplay, runFusionReplayToday } from "./fusion-replay";
+import { getDeepRaceForVoice, getRaceBias } from "./brisnet-deep-ingest";
+import { computeRunnerFeatures, type RunnerFeatures } from "./features";
+import { fuseRaceV3 } from "./fusion-v3";
 import type {
   CardWithRaces,
   RaceWithResult,
@@ -362,6 +365,50 @@ export const VOICE_TOOLS: Anthropic.Tool[] = [
       properties: {
         cardId: { type: "number", description: "Card to replay. Omit for today's card." },
       },
+    },
+  },
+  {
+    name: "lookup_runner_feature",
+    description:
+      "Look up a single Fusion v3 deep-feature score (0-100) for one runner in a race, " +
+      "or all twelve at once. Features: pace_fit, class_earned, trip_compromised, bias_match, " +
+      "jt_hot, trainer_angle, work_sharp, form_curve, dist_surf_form, conditions_pedigree, " +
+      "layoff, honesty_check. Use for 'what's the 6's pace fit', 'how's the class on the 3', " +
+      "'give me the deep features on the 4 in race 2'. Reads the persisted Brisnet deep card.",
+    input_schema: {
+      type: "object",
+      properties: {
+        raceNumber: { type: "integer", description: "Race number." },
+        programNumber: { type: "string", description: "Program (saddlecloth) number of the runner." },
+        featureName: {
+          type: "string",
+          description:
+            "One feature to return (e.g. 'pace_fit', 'dist_surf_form'). Omit for all twelve. " +
+            "The '_score' suffix is optional.",
+        },
+      },
+      required: ["raceNumber", "programNumber"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "lookup_track_bias",
+    description:
+      "Look up today's Brisnet Track Bias sheet — run-style impact values (E/EP/P/S), " +
+      "post-position bias (rail / 1-3 / 4-7 / 8+), wire %, speed bias %, and the dominant/" +
+      "favorable styles. Use for 'what's the rail doing', 'is there a speed bias', " +
+      "'what style is the meet favoring'. Scope 'meet' (default) or 'week'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        raceNumber: { type: "integer", description: "Race number whose bias sheet to read. Defaults to the active/nearest race." },
+        scope: {
+          type: "string",
+          enum: ["meet", "week"],
+          description: "MEET-scope (default) or WEEK-scope bias snapshot.",
+        },
+      },
+      additionalProperties: false,
     },
   },
 ];
@@ -1023,6 +1070,116 @@ export function lockCard(input: { cardId?: number }, ctx: ToolContext): ToolResu
   }
 }
 
+// ── PR #28b: deep-feature + track-bias lookups ──────────────────────────────
+// Both read the persisted Brisnet deep card for the active card's track/date.
+// They compute features the same way Fusion v3 does (computeRunnerFeatures +
+// fuseRaceV3) so the spoken number matches the dashboard's tiering exactly.
+
+// Normalize a user-supplied feature name to a RunnerFeatures key. Accepts with
+// or without the "_score" suffix; "honesty"/"honesty_check" map to the bool.
+function resolveFeatureKey(name: string): keyof RunnerFeatures | null {
+  const n = name.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (n === "honesty" || n === "honesty_check") return "honesty_check";
+  const withSuffix = n.endsWith("_score") ? n : `${n}_score`;
+  const keys: (keyof RunnerFeatures)[] = [
+    "pace_fit_score", "class_earned_score", "trip_compromised_score", "bias_match_score",
+    "jt_hot_score", "trainer_angle_score", "work_sharp_score", "form_curve_score",
+    "dist_surf_form_score", "conditions_pedigree_score", "layoff_score", "honesty_check",
+  ];
+  return keys.find((k) => k === withSuffix || k === n) ?? null;
+}
+
+export function lookupRunnerFeature(
+  input: { raceNumber: number; programNumber: string; featureName?: string },
+  ctx: ToolContext,
+): ToolResult {
+  try {
+    const date = ctx.card?.date;
+    const track = ctx.card?.track;
+    if (!date || !track) return { error: "No active card to read deep features from." };
+
+    const race = getDeepRaceForVoice(date, track, input.raceNumber);
+    if (!race) {
+      return {
+        error: `No Brisnet deep data for race ${input.raceNumber} on the ${track} ${date} card.`,
+      };
+    }
+    const runner = race.runners.find((r) => r.programNumber === String(input.programNumber));
+    if (!runner) {
+      return { error: `#${input.programNumber} is not in race ${input.raceNumber}.` };
+    }
+
+    // Compute features in field context, then fill honesty_check the way Fusion
+    // v3 does (top vs second by composite) so the bool reflects the real call.
+    const fused = fuseRaceV3(race);
+    const scored = fused.runners.find((r) => r.pgm === runner.programNumber);
+    const features: RunnerFeatures =
+      scored?.features ?? computeRunnerFeatures(runner, race);
+
+    if (input.featureName) {
+      const key = resolveFeatureKey(input.featureName);
+      if (!key) return { error: `Unknown feature "${input.featureName}".` };
+      return {
+        raceNumber: input.raceNumber,
+        programNumber: runner.programNumber,
+        horseName: runner.horseName,
+        feature: key.replace(/_score$/, ""),
+        value: features[key],
+      };
+    }
+    return {
+      raceNumber: input.raceNumber,
+      programNumber: runner.programNumber,
+      horseName: runner.horseName,
+      composite: scored?.composite ?? null,
+      tier: fused.tiers.find((t) => t.pgm === runner.programNumber)?.tier ?? null,
+      features,
+    };
+  } catch (e) {
+    return { error: `Feature lookup failed: ${(e as Error).message}` };
+  }
+}
+
+export function lookupTrackBias(
+  input: { raceNumber?: number; scope?: "meet" | "week" },
+  ctx: ToolContext,
+): ToolResult {
+  try {
+    const date = ctx.card?.date;
+    const track = ctx.card?.track;
+    if (!date || !track) return { error: "No active card to read track bias from." };
+
+    const raceNumber =
+      input.raceNumber ??
+      nearestUpcomingRace(ctx.card, ctx.activeRaceNumber)?.raceNumber ??
+      ctx.card.races[0]?.raceNumber;
+    if (raceNumber == null) return { error: "No race to read bias for." };
+
+    const wanted = (input.scope ?? "meet").toUpperCase();
+    const all = getRaceBias(date, track, raceNumber);
+    if (all.length === 0) {
+      return { error: `No Brisnet Track Bias sheet for race ${raceNumber} on the ${track} ${date} card.` };
+    }
+    const bias = all.find((b) => b.scope === wanted) ?? all[0];
+    return {
+      raceNumber,
+      scope: bias.scope,
+      surface: bias.surface,
+      distance: bias.distance,
+      numRaces: bias.numRaces,
+      wirePct: bias.wirePct,
+      speedBiasPct: bias.speedBiasPct,
+      dominantStyle: bias.dominantStyle,
+      favorableStyles: bias.favorableStyles,
+      styleImpact: { E: bias.ivE, "E/P": bias.ivEp, P: bias.ivP, S: bias.ivS },
+      postImpact: { rail: bias.ivRail, "1-3": bias.iv1_3, "4-7": bias.iv4_7, "8+": bias.iv8plus },
+      favorablePosts: bias.favorablePosts,
+    };
+  } catch (e) {
+    return { error: `Track bias lookup failed: ${(e as Error).message}` };
+  }
+}
+
 // Dispatch a tool_use block to its handler. Unknown tools resolve to an error
 // result rather than throwing so the loop can continue.
 export async function runTool(name: string, input: unknown, ctx: ToolContext): Promise<ToolResult> {
@@ -1079,6 +1236,13 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
       return getDeepPostmortemTool(i as { cardId?: number }, ctx);
     case "run_fusion_replay":
       return runFusionReplayTool(i as { cardId?: number }, ctx);
+    case "lookup_runner_feature":
+      return lookupRunnerFeature(
+        i as { raceNumber: number; programNumber: string; featureName?: string },
+        ctx,
+      );
+    case "lookup_track_bias":
+      return lookupTrackBias(i as { raceNumber?: number; scope?: "meet" | "week" }, ctx);
     default:
       return { error: `Unknown tool: ${name}` };
   }

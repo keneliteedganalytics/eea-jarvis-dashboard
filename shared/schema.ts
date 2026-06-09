@@ -317,6 +317,62 @@ export const predictionHistory = sqliteTable("prediction_history", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
+// ── Brisnet deep-field ingest (PR #28b) ───────────────────────────────────
+// Per-race Track Bias snapshot (MEET + WEEK), keyed (date,track,race,scope).
+export const brisnetRaceBias = sqliteTable("brisnet_race_bias", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  raceDate: text("race_date").notNull(),
+  trackCode: text("track_code").notNull(),
+  raceNumber: integer("race_number").notNull(),
+  scope: text("scope").notNull(),
+  surface: text("surface"),
+  distance: text("distance"),
+  numRaces: integer("num_races"),
+  dateRangeStart: text("date_range_start"),
+  dateRangeEnd: text("date_range_end"),
+  wirePct: real("wire_pct"),
+  speedBiasPct: real("speed_bias_pct"),
+  wnrAvgBl1c: real("wnr_avg_bl_1c"),
+  wnrAvgBl2c: real("wnr_avg_bl_2c"),
+  ivE: real("iv_e"),
+  ivEp: real("iv_ep"),
+  ivP: real("iv_p"),
+  ivS: real("iv_s"),
+  pctE: real("pct_e"),
+  pctEp: real("pct_ep"),
+  pctP: real("pct_p"),
+  pctS: real("pct_s"),
+  dominantStyle: text("dominant_style"),
+  favorableStyles: text("favorable_styles"), // JSON array
+  ivRail: real("iv_rail"),
+  iv1_3: real("iv_1_3"),
+  iv4_7: real("iv_4_7"),
+  iv8plus: real("iv_8plus"),
+  pctRail: real("pct_rail"),
+  pct1_3: real("pct_1_3"),
+  pct4_7: real("pct_4_7"),
+  pct8plus: real("pct_8plus"),
+  favorablePosts: text("favorable_posts"), // JSON array
+  ingestedAt: text("ingested_at").notNull(),
+});
+
+// Per-race BRIS pars, keyed (date,track,race).
+export const brisnetRacePars = sqliteTable("brisnet_race_pars", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  raceDate: text("race_date").notNull(),
+  trackCode: text("track_code").notNull(),
+  raceNumber: integer("race_number").notNull(),
+  parE1: real("par_e1"),
+  parE2Late: real("par_e2_late"),
+  parSpd: real("par_spd"),
+  surface: text("surface"),
+  distanceFurlongs: real("distance_furlongs"),
+  ingestedAt: text("ingested_at").notNull(),
+});
+
+export type BrisnetRaceBiasRow = typeof brisnetRaceBias.$inferSelect;
+export type BrisnetRaceParsRow = typeof brisnetRacePars.$inferSelect;
+
 // ── Deep post-mortem (PR #25) ─────────────────────────────────────────────
 // One row per card holding the full DeepPostmortem payload as JSON. Idempotent:
 // re-running the analyzer for a card overwrites its row (card_id is unique).
