@@ -112,8 +112,9 @@ export function ManualIngestModal() {
   };
 
   const goToResults = () => {
+    const cardId = result?.cardId;
     reset();
-    navigate("/results");
+    navigate(cardId ? `/results?cardId=${cardId}` : "/results");
   };
 
   return (
