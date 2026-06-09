@@ -14,6 +14,7 @@ import { HostHero } from "@/components/brand/HostHero";
 import { TrackRecordHero } from "@/components/TrackRecordHero";
 import { DraftCardsSection } from "@/components/DraftCardsSection";
 import { PullCardModal } from "@/components/PullCardModal";
+import { ManualIngestModal } from "@/components/ManualIngestModal";
 
 function StatBox({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
   return (
@@ -82,7 +83,8 @@ export default function Home() {
     return (
       <div className="p-4 sm:p-6 max-w-[1100px] mx-auto pb-28">
         <TrackRecordHero />
-        <div className="mt-4 flex justify-end">
+        <div className="mt-4 flex justify-end gap-2">
+          <ManualIngestModal />
           <PullCardModal />
         </div>
         <DraftCardsSection />
@@ -141,6 +143,7 @@ export default function Home() {
               <RefreshCw className={`h-4 w-4 mr-1.5 shrink-0 ${fetchNowMutation.isPending ? "animate-spin" : ""}`} />
               {fetchNowMutation.isPending ? "Fetching…" : "Fetch Results Now"}
             </Button>
+            <ManualIngestModal />
             <PullCardModal />
             {!card.locked ? (
               <Button
