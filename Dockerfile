@@ -45,10 +45,17 @@ ENV NODE_ENV=production \
 
 # Headless Chromium needs its OS-level shared libraries (fonts, libnss3, libgbm,
 # etc.) present in the runtime image too — the builder's `--with-deps` installed
-# them in the builder layer only. `playwright install-deps chromium` apt-installs
-# exactly that set for the pinned Chromium without re-downloading the browser.
+# them in the builder layer only.
 COPY --from=builder /app/node_modules ./node_modules
-RUN npx playwright install-deps chromium \
+
+# Chromium runtime shared libraries. These mirror what
+# `playwright install-deps chromium` installs on Debian bookworm, but apt-installed
+# directly so we don't depend on the playwright CLI being resolvable at this layer.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+      libdbus-1-3 libxkbcommon0 libatspi2.0-0 libx11-6 libxcomposite1 \
+      libxdamage1 libxext6 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
+      libcairo2 libasound2 libfontconfig1 fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy only what production needs.
