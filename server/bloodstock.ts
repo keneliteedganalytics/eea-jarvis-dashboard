@@ -34,7 +34,7 @@
 // 50 for the *aptitude* figures and toward the win-rate prior only where we
 // reason in win-rate terms; see shrinkAptitude / shrinkWinRate below.
 
-import type { EeaWeights } from "./services/eea-config";
+import { DEFAULT_WEIGHTS, type EeaWeights } from "./services/eea-config";
 import type { RaceConditions } from "./services/parsers/types";
 
 export type BloodstockConfidence = "high" | "medium" | "low" | "none";
@@ -157,10 +157,11 @@ function isTurf(conditions: RaceConditions): boolean {
 export function computeBloodstockFitness(
   horse: BloodstockHorse,
   race: BloodstockRace,
-  weights: EeaWeights["bloodstock"],
+  weights: EeaWeights["bloodstock"] | undefined,
 ): BloodstockFitness {
+  const w = weights ?? DEFAULT_WEIGHTS.bloodstock;
   const reasonCodes: string[] = [];
-  const k = weights.shrinkageK;
+  const k = w.shrinkageK;
 
   const sire = lookupSire(horse.sireName);
   const damSire = lookupSire(horse.damSireName);
@@ -219,19 +220,19 @@ export function computeBloodstockFitness(
   // wet/sloppy/muddy surface — otherwise reported but flagged not-relevant.
   const wetFit = blend((a) => a.wet);
   if (race.surfaceWet) {
-    if (wetFit >= weights.wetStrongComposite) reasonCodes.push("wet-pedigree-strong");
-    else if (wetFit <= weights.wetWeakComposite) reasonCodes.push("wet-pedigree-weak");
+    if (wetFit >= w.wetStrongComposite) reasonCodes.push("wet-pedigree-strong");
+    else if (wetFit <= w.wetWeakComposite) reasonCodes.push("wet-pedigree-weak");
   }
 
   // First-timer bonus: pedigree matters more for lightly-raced horses. Scales
   // with how far the surface+distance signal sits above neutral, capped at max.
   const starts = horse.lifetimeStarts ?? null;
   let firstTimerBonus = 0;
-  if (starts != null && starts < weights.firstTimerStartsCutoff) {
+  if (starts != null && starts < w.firstTimerStartsCutoff) {
     const lean = Math.max(0, (surfaceFit + distanceFit) / 2 - NEUTRAL); // 0..50
     firstTimerBonus = Math.min(
-      weights.firstTimerBonusMax,
-      (lean / 50) * weights.firstTimerBonusMax,
+      w.firstTimerBonusMax,
+      (lean / 50) * w.firstTimerBonusMax,
     );
     if (firstTimerBonus > 0) reasonCodes.push("first-timer-pedigree-lean");
   }
@@ -239,13 +240,13 @@ export function computeBloodstockFitness(
   // Composite: weighted blend of the four sub-fits. The wet term only enters on
   // a wet surface; off a dry track its weight is redistributed to surface so the
   // composite stays on the same 0-100 scale.
-  const wWet = race.surfaceWet ? weights.weights.wet : 0;
-  const wSurface = weights.weights.surface + (race.surfaceWet ? 0 : weights.weights.wet);
+  const wWet = race.surfaceWet ? w.weights.wet : 0;
+  const wSurface = w.weights.surface + (race.surfaceWet ? 0 : w.weights.wet);
   const composite =
     wSurface * surfaceFit +
-    weights.weights.distance * distanceFit +
+    w.weights.distance * distanceFit +
     wWet * wetFit +
-    weights.weights.firstTimer * (NEUTRAL + firstTimerBonus * (50 / weights.firstTimerBonusMax));
+    w.weights.firstTimer * (NEUTRAL + firstTimerBonus * (50 / w.firstTimerBonusMax));
 
   // Confidence from how many of the two influences we actually recognized.
   const known = (sire ? 1 : 0) + (damSire ? 1 : 0);

@@ -9,7 +9,7 @@
 // diverge. eeap_fit re-weights pace for the projected race shape + yesterday's
 // bias so a lone speedster in a slow-pace, speed-favoring meet gets a boost.
 
-import type { EeaWeights } from "./eea-config";
+import { DEFAULT_WEIGHTS, type EeaWeights } from "./eea-config";
 import type {
   BrisnetRace,
   BrisnetHorse,
@@ -176,8 +176,9 @@ function weightedBlend(parts: { value: number | null | undefined; weight: number
 function computeEeas(
   b: BrisnetHorse | undefined,
   e: EquibaseHorse | undefined,
-  w: EeaWeights["eeas"],
+  weights: EeaWeights["eeas"] | undefined,
 ): { eeas: number | null; flags: string[] } {
+  const w = weights ?? DEFAULT_WEIGHTS.eeas;
   const brisSpeed = b?.speedLast ?? null;
   const equiSpeed = avg(e?.speedLast, e?.speedAvg3);
   const eeas = weightedBlend([
@@ -193,7 +194,8 @@ function computeEeas(
   return { eeas, flags };
 }
 
-function computeEeap(b: BrisnetHorse | undefined, e: EquibaseHorse | undefined, w: EeaWeights["eeap"]): number | null {
+function computeEeap(b: BrisnetHorse | undefined, e: EquibaseHorse | undefined, weights: EeaWeights["eeap"] | undefined): number | null {
+  const w = weights ?? DEFAULT_WEIGHTS.eeap;
   // Brisnet pace components live in BrisnetPace; fall back to Equibase pace
   // figures as a sanity anchor. Many v1 cards only carry the equibase pace.
   const e1 = b?.pace?.e1Last ?? b?.pace?.e1Avg3 ?? null;
@@ -212,8 +214,9 @@ function computeEeac(
   b: BrisnetHorse | undefined,
   e: EquibaseHorse | undefined,
   conditions: RaceConditions,
-  w: EeaWeights["eeac"],
+  weights: EeaWeights["eeac"] | undefined,
 ): number | null {
+  const w = weights ?? DEFAULT_WEIGHTS.eeac;
   const brisClass = b?.classRating ?? b?.primePower ?? null;
   const equiClass = e?.classRating ?? null;
   // Purse band overlay: map purse into the same ~100-band so it nudges class.
@@ -295,20 +298,26 @@ export function fuseRace(
   const surface = weather?.surfaceImpact ?? "unknown";
   const wetTrack = OFF_TRACK.has(surface);
   const isTurf = (conditions.surface || "").toUpperCase().includes("TURF");
-  const sev = wetTrack ? weights.weather.severity[surface as "wet" | "sloppy" | "muddy"] : 0;
+  // Defensive sub-object defaults: a formula_versions row written by an older
+  // schema can be missing whole sub-objects. loadWeights() deep-merges defaults
+  // in, but guard here too so any other call path can't crash on a stale row.
+  const wWeather = weights.weather ?? DEFAULT_WEIGHTS.weather;
+  const wRating = weights.rating ?? DEFAULT_WEIGHTS.rating;
+  const wClassAware = weights.classAware ?? DEFAULT_WEIGHTS.classAware;
+  const sev = wetTrack ? wWeather.severity[surface as "wet" | "sloppy" | "muddy"] : 0;
   const weatherReasons = new Set<string>();
-  const bw = weights.bloodstock;
+  const bw = weights.bloodstock ?? DEFAULT_WEIGHTS.bloodstock;
 
   const horses: FusedHorse[] = interim.map((h) => {
     const loneSpeed = h.pgm === loneSpeedPgm;
     const isEarly = earlyTypes.some((t) => t.pgm === h.pgm);
     const eeapFit = computeEeapFit(h.eeap, loneSpeed, contestedPace && !loneSpeed, bias);
-    const cls = weights.classAware[raceType];
+    const cls = wClassAware[raceType];
     // EEA Rating combines the composites under the rating weights, then the
     // class-aware adjuster tilts speed vs class emphasis per race type.
-    const speedTerm = (h.eeas ?? 0) * weights.rating.eeas * (cls?.speed_weight ?? 1);
-    const paceTerm = (eeapFit ?? h.eeap ?? 0) * weights.rating.eeap_fit * (cls?.form_weight ?? 1);
-    const classTerm = (h.eeac ?? 0) * weights.rating.eeac * (cls?.class_weight ?? 1);
+    const speedTerm = (h.eeas ?? 0) * wRating.eeas * (cls?.speed_weight ?? 1);
+    const paceTerm = (eeapFit ?? h.eeap ?? 0) * wRating.eeap_fit * (cls?.form_weight ?? 1);
+    const classTerm = (h.eeac ?? 0) * wRating.eeac * (cls?.class_weight ?? 1);
     const hasAny = h.eeas != null || h.eeap != null || h.eeac != null;
     let baseRating = hasAny ? speedTerm + paceTerm + classTerm : null;
 
@@ -320,22 +329,22 @@ export function fuseRace(
     if (wetTrack && baseRating != null) {
       // 1) Boost proven mudders, scaled by wet win % and surface severity.
       if (h.wetWinPct != null && h.wetWinPct > 0) {
-        baseRating += weights.weather.mudderBoostMax * (h.wetWinPct / 100) * sev;
+        baseRating += wWeather.mudderBoostMax * (h.wetWinPct / 100) * sev;
         flags.push("wet-track-boost");
         weatherReasons.add("mudder-boost");
       }
       // 2) Turf rained on: de-emphasize raw turf speed (turf plays differently).
       if (isTurf) {
-        baseRating -= weights.weather.turfSpeedPenalty * (h.eeas ?? 0 ? 1 : 0) * sev;
+        baseRating -= wWeather.turfSpeedPenalty * (h.eeas ?? 0 ? 1 : 0) * sev;
         weatherReasons.add("turf-speed-deemphasized");
       }
       // 3) Sloppy/muddy dirt flattens pace: lightly favor closers over speed.
       if (!isTurf) {
         if (isEarly) {
-          baseRating -= weights.weather.closerBias * sev;
+          baseRating -= wWeather.closerBias * sev;
           weatherReasons.add("speed-trimmed-off-track");
         } else {
-          baseRating += weights.weather.closerBias * sev;
+          baseRating += wWeather.closerBias * sev;
           weatherReasons.add("closer-favored-off-track");
         }
       }

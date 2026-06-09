@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { DEFAULT_WEIGHTS } from "./services/eea-config";
 
 // Resolve the SQLite file path.
 //
@@ -545,6 +546,60 @@ if (!predictionsCols.has("scratched")) {
 if (!predictionsCols.has("scratched_at")) {
   sqlite.exec("ALTER TABLE predictions ADD COLUMN scratched_at TEXT");
 }
+
+// Idempotent formula_versions weights repair (PR #34). A row written by an older
+// schema can be missing whole top-level sub-objects (e.g. `bloodstock`), which
+// crashed manual ingest with "Cannot read properties of undefined (reading
+// 'shrinkageK')". Deep-merge each active row's weightsJson on top of
+// DEFAULT_WEIGHTS and write it back when (and only when) a sub-object was
+// missing/null. Running again on a healthy row is a no-op.
+function repairStaleWeightsRows(): void {
+  let repaired = 0;
+  try {
+    const rows = sqlite
+      .prepare("SELECT id, weights_json FROM formula_versions WHERE deactivated_at IS NULL")
+      .all() as { id: number; weights_json: string }[];
+    const update = sqlite.prepare("UPDATE formula_versions SET weights_json = ? WHERE id = ?");
+    for (const row of rows) {
+      let stored: Record<string, unknown> = {};
+      try {
+        stored = JSON.parse(row.weights_json) as Record<string, unknown>;
+      } catch {
+        stored = {}; // corrupt JSON → rebuild from defaults
+      }
+      const merged: Record<string, any> = { ...DEFAULT_WEIGHTS };
+      let changed = false;
+      for (const key of Object.keys(DEFAULT_WEIGHTS) as (keyof typeof DEFAULT_WEIGHTS)[]) {
+        const baseVal = (DEFAULT_WEIGHTS as any)[key];
+        const storedVal = (stored as any)[key];
+        if (storedVal === undefined || storedVal === null) {
+          changed = true; // missing top-level sub-object → take the default
+        } else if (
+          baseVal && typeof baseVal === "object" && !Array.isArray(baseVal) &&
+          storedVal && typeof storedVal === "object" && !Array.isArray(storedVal)
+        ) {
+          merged[key] = { ...baseVal, ...storedVal };
+        } else {
+          merged[key] = storedVal;
+        }
+      }
+      // Preserve any extra stored keys not present in DEFAULT_WEIGHTS.
+      for (const key of Object.keys(stored)) {
+        if (!(key in merged)) merged[key] = (stored as any)[key];
+      }
+      if (changed) {
+        update.run(JSON.stringify(merged), row.id);
+        repaired++;
+      }
+    }
+  } catch {
+    // formula_versions may not exist yet on the very first boot; ignore.
+  }
+  if (process.env.NODE_ENV !== "test" && process.env.VITEST !== "true") {
+    console.log(`[migrations] repaired ${repaired} stale weights rows`);
+  }
+}
+repairStaleWeightsRows();
 
 export const db = drizzle(sqlite);
 export { sqlite };
