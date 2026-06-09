@@ -56,6 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libdbus-1-3 libxkbcommon0 libatspi2.0-0 libx11-6 libxcomposite1 \
       libxdamage1 libxext6 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
       libcairo2 libasound2 libfontconfig1 fonts-liberation \
+      poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy only what production needs.
