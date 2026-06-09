@@ -19,6 +19,8 @@ import * as cheerio from "cheerio";
 import { sqlite } from "../db";
 import { parseEquibaseText, pdfToLayoutText } from "./parsers/equibase";
 import type { EquibaseCard } from "./parsers/types";
+import { getOrAcquire, invalidate } from "./session-cache";
+import { cookieHeaderFrom, type BrowserSession } from "./browser-session";
 
 // The login FORM (display) page — GET it first to seed the Incapsula/CMP
 // cookies (COOKIE_TEST, visid_incap_*, incap_ses_*) the ColdFusion app checks.
@@ -385,6 +387,59 @@ export async function downloadPP(
   return { pdfPath, byteCount: buf.length, httpStatus };
 }
 
+// ── Session-backed (Playwright) variants (PR #29) ────────────────────────────
+// The raw-fetch login was bounced to eebErrorNoCookies.cfm by Incapsula. These
+// drop-in variants take a Playwright-harvested BrowserSession and replay its
+// cookies + UA against the same PP-listing and download endpoints. The HTML
+// scrape and PDF validation are unchanged — only the auth source differs.
+export async function listAvailableTracksWithSession(
+  session: BrowserSession,
+  raceDate: Date,
+): Promise<AvailableTrack[]> {
+  const url = `${PP_PAGE_URL}?raceDate=${encodeURIComponent(
+    formatRaceDateParam(raceDate),
+  )}`;
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": session.userAgent,
+      Cookie: cookieHeaderFrom(session.cookies),
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`PP page HTTP ${res.status} for ${formatRaceDateParam(raceDate)}`);
+  }
+  const html = await res.text();
+  return parseAvailableTracks(html);
+}
+
+export async function downloadPPWithSession(
+  session: BrowserSession,
+  track: AvailableTrack,
+  raceDate: Date,
+): Promise<{ pdfPath: string; byteCount: number; httpStatus: number }> {
+  const res = await fetch(track.downloadUrl, {
+    headers: {
+      "User-Agent": session.userAgent,
+      Cookie: cookieHeaderFrom(session.cookies),
+    },
+  });
+  const httpStatus = res.status;
+  if (!res.ok) {
+    throw new Error(`download HTTP ${httpStatus} for ${track.trackCode}`);
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (!buf.subarray(0, 5).toString("latin1").startsWith("%PDF-")) {
+    throw new Error(
+      `download for ${track.trackCode} was not a PDF (${buf.length} bytes)`,
+    );
+  }
+  const dir = ppDirForDate(raceDate);
+  fs.mkdirSync(dir, { recursive: true });
+  const pdfPath = path.join(dir, `${track.trackCode}.pdf`);
+  fs.writeFileSync(pdfPath, buf);
+  return { pdfPath, byteCount: buf.length, httpStatus };
+}
+
 export async function parsePP(
   pdfPath: string,
   trackCode: string,
@@ -479,8 +534,19 @@ export async function ingestForDate(
   let topError: string | undefined;
 
   try {
-    const jar = await loginEquibase(username, password);
-    const available = await listAvailableTracks(jar, raceDate);
+    // Playwright-harvested session (PR #29) — replaces the raw-fetch login that
+    // Incapsula bounced to eebErrorNoCookies.cfm. Single-flight + 6h-TTL cached.
+    let session = await getOrAcquire("equibase");
+    let available: AvailableTrack[];
+    try {
+      available = await listAvailableTracksWithSession(session, raceDate);
+    } catch {
+      // A non-OK PP page often means the cookies aged out: re-mint once and use
+      // the fresh session for the downloads below too.
+      invalidate("equibase");
+      session = await getOrAcquire("equibase");
+      available = await listAvailableTracksWithSession(session, raceDate);
+    }
     const byCode = new Map(available.map((t) => [t.trackCode, t]));
 
     for (const code of wanted) {
@@ -490,7 +556,7 @@ export async function ingestForDate(
         continue;
       }
       try {
-        const dl = await downloadPP(jar, track, raceDate);
+        const dl = await downloadPPWithSession(session, track, raceDate);
         let raceCount: number | undefined;
         try {
           const card = await parsePP(dl.pdfPath, code, raceDate);

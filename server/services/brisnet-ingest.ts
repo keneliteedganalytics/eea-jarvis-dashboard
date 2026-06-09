@@ -22,6 +22,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { sqlite } from "../db";
 import { parseDrmZip, type DrmCard } from "./parsers/brisnet-drm";
+import { getOrAcquire, invalidate } from "./session-cache";
+import { cookieHeaderFrom, type BrowserSession } from "./browser-session";
 
 const LOGIN_URL = "https://www.brisnet.com/product/login";
 const DOWNLOAD_BASE = "https://www.brisnet.com/product/download";
@@ -291,6 +293,50 @@ export async function downloadDrmZip(
   return { buf, httpStatus, contentType };
 }
 
+// Download a DRM zip using a Playwright-harvested session (cookies + UA) rather
+// than the raw-fetch CookieJar. Same response validation as downloadDrmZip — we
+// reject redirects/HTML/non-zip bodies — but the auth comes from the browser
+// session the bot-walls actually accept. The session UA is replayed so the
+// download request matches where the cookies were minted.
+export async function downloadDrmZipWithSession(
+  session: BrowserSession,
+  trackCode: string,
+  raceDate: Date,
+): Promise<{ buf: Buffer; httpStatus: number; contentType: string }> {
+  const url = buildDownloadUrl(trackCode, raceDate);
+  const res = await fetch(url, {
+    redirect: "manual",
+    headers: {
+      "User-Agent": session.userAgent,
+      Cookie: cookieHeaderFrom(session.cookies),
+    },
+  });
+  const httpStatus = res.status;
+  const contentType = (res.headers.get("content-type") || "").toLowerCase();
+  debug("download (session)", url, "->", httpStatus, contentType);
+
+  if (httpStatus >= 300 && httpStatus < 400) {
+    throw new Error(
+      `download for ${trackCode} redirected (HTTP ${httpStatus}) — session likely expired`,
+    );
+  }
+  if (!res.ok) {
+    throw new Error(`download HTTP ${httpStatus} for ${trackCode}`);
+  }
+  if (contentType.includes("text/html")) {
+    throw new Error(
+      `download for ${trackCode} returned HTML (session expired or no card)`,
+    );
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (!(buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 0x03 && buf[3] === 0x04)) {
+    throw new Error(
+      `download for ${trackCode} was not a zip (${buf.length} bytes, ${contentType})`,
+    );
+  }
+  return { buf, httpStatus, contentType };
+}
+
 // ── Persistence ──────────────────────────────────────────────────────────────
 // Upsert every parsed horse row for a card into brisnet_horse_data. Returns the
 // number of rows written. Uses the unique key so a re-run replaces cleanly.
@@ -483,11 +529,26 @@ export async function ingestForDate(
   let topError: string | undefined;
 
   try {
-    const jar = await loginBrisnet(username, password);
+    // Playwright-harvested session (PR #29) — replaces the raw-fetch login that
+    // Akamai silently dropped. Single-flight + 6h-TTL cached via session-cache.
+    let session = await getOrAcquire("brisnet");
 
     for (const code of wanted) {
       try {
-        const dl = await downloadDrmZip(jar, code, raceDate);
+        let dl;
+        try {
+          dl = await downloadDrmZipWithSession(session, code, raceDate);
+        } catch (e) {
+          // A redirect/HTML body means the cookies expired mid-run: drop the
+          // cached session, re-acquire once, and retry this track.
+          if (/session likely expired|session expired/i.test((e as Error).message)) {
+            invalidate("brisnet");
+            session = await getOrAcquire("brisnet");
+            dl = await downloadDrmZipWithSession(session, code, raceDate);
+          } else {
+            throw e;
+          }
+        }
         // Persist the raw zip for manual recovery / re-parse.
         const dir = drmDirForDate(raceDate);
         fs.mkdirSync(dir, { recursive: true });
