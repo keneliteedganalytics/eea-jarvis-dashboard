@@ -1,11 +1,14 @@
 import { Link } from "wouter";
+import { useMutation } from "@tanstack/react-query";
 import type { RaceWithResult } from "@shared/schema";
 import { TierPill } from "@/components/brand/TierPill";
 import { WeatherChip } from "@/components/WeatherChip";
 import { PickCell } from "@/components/PickCell";
 import { tierOf } from "@/lib/tiers";
 import { useJarvis } from "@/lib/jarvis";
-import { Play, Flag } from "lucide-react";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { Play, Flag, RefreshCw, Trash2 } from "lucide-react";
 
 function ResultStrip({ race }: { race: RaceWithResult }) {
   if (!race.result) return null;
@@ -38,7 +41,42 @@ function ResultStrip({ race }: { race: RaceWithResult }) {
 export function RaceRow({ race, readOnly = false }: { race: RaceWithResult; readOnly?: boolean }) {
   const cfg = tierOf(race.tier);
   const jarvis = useJarvis();
+  const { toast } = useToast();
   const flags = JSON.parse(race.flags || "[]") as string[];
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/cards"] });
+  };
+
+  // PR #44: pull this race's official result from OTB on demand.
+  const refreshOtb = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/races/${race.id}/auto-grade`, {});
+      return res.json() as Promise<{ graded: boolean; reason?: string }>;
+    },
+    onSuccess: (data) => {
+      invalidate();
+      toast(
+        data.graded
+          ? { title: `R${race.raceNumber} graded`, description: "Pulled official result from OTB." }
+          : { title: `R${race.raceNumber} not final`, description: data.reason ?? "OTB has no official result yet." },
+      );
+    },
+    onError: (e) => toast({ title: "OTB fetch failed", description: (e as Error).message, variant: "destructive" }),
+  });
+
+  // PR #44: clear this race's result row.
+  const clearResult = useMutation({
+    mutationFn: async () => {
+      await apiRequest("DELETE", `/api/races/${race.id}/result`);
+    },
+    onSuccess: () => {
+      invalidate();
+      toast({ title: `R${race.raceNumber} cleared`, description: "Result removed." });
+    },
+    onError: (e) => toast({ title: "Clear failed", description: (e as Error).message, variant: "destructive" }),
+  });
 
   const RaceLink = ({ className, children }: { className?: string; children: React.ReactNode }) =>
     readOnly ? (
@@ -96,20 +134,50 @@ export function RaceRow({ race, readOnly = false }: { race: RaceWithResult; read
         </div>
       </div>
 
-      {/* Per-race play icon — hidden in read-only historical view */}
+      {/* Per-race controls — hidden in read-only historical view */}
       {!readOnly && (
-        <button
-          onClick={(e) => {
-            e.preventDefault();
-            jarvis.briefViaPost(`/api/jarvis/brief-race/${race.id}`, `Race ${race.raceNumber} briefing`);
-          }}
-          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full border border-gold/30 bg-navy-raised text-gold opacity-0 transition-opacity group-hover:opacity-100 hover:bg-gold hover:text-navy-bg focus:opacity-100"
-          data-testid={`button-brief-race-${race.raceNumber}`}
-          aria-label={`Brief race ${race.raceNumber}`}
-          title="Brief this race"
-        >
-          <Play className="h-3.5 w-3.5" />
-        </button>
+        <div className="absolute right-3 top-3 flex items-center gap-1.5">
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              refreshOtb.mutate();
+            }}
+            disabled={refreshOtb.isPending}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-gold/30 bg-navy-raised text-gold opacity-0 transition-opacity group-hover:opacity-100 hover:bg-gold hover:text-navy-bg focus:opacity-100 disabled:opacity-50"
+            data-testid={`button-refresh-otb-${race.raceNumber}`}
+            aria-label={`Refresh race ${race.raceNumber} from OTB`}
+            title="Refresh result from OTB"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshOtb.isPending ? "animate-spin" : ""}`} />
+          </button>
+          {race.result && (
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                if (window.confirm(`Clear the result for R${race.raceNumber}?`)) clearResult.mutate();
+              }}
+              disabled={clearResult.isPending}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-loss/30 bg-navy-raised text-loss opacity-0 transition-opacity group-hover:opacity-100 hover:bg-loss hover:text-navy-bg focus:opacity-100 disabled:opacity-50"
+              data-testid={`button-clear-result-${race.raceNumber}`}
+              aria-label={`Clear race ${race.raceNumber} result`}
+              title="Clear result"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              jarvis.briefViaPost(`/api/jarvis/brief-race/${race.id}`, `Race ${race.raceNumber} briefing`);
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-gold/30 bg-navy-raised text-gold opacity-0 transition-opacity group-hover:opacity-100 hover:bg-gold hover:text-navy-bg focus:opacity-100"
+            data-testid={`button-brief-race-${race.raceNumber}`}
+            aria-label={`Brief race ${race.raceNumber}`}
+            title="Brief this race"
+          >
+            <Play className="h-3.5 w-3.5" />
+          </button>
+        </div>
       )}
     </div>
   );

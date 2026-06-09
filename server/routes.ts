@@ -34,7 +34,7 @@ import {
   cardSummaryScript,
 } from "./services/scripts";
 import { generateSpeech, getCachedFilePath, fetchVoices } from "./services/tts";
-import { addSseClient, removeSseClient } from "./services/events";
+import { addSseClient, removeSseClient, broadcastEvent } from "./services/events";
 import { startPoller, runPollerNow } from "./services/poller";
 import { voiceRouter } from "./routes/voice";
 import { showApiRouter, showFileRouter } from "./routes/show";
@@ -42,6 +42,8 @@ import { equibaseAdminRouter } from "./routes/equibase";
 import { startEquibaseIngestCron } from "./services/equibase-cron";
 import { startWeatherCron } from "./services/weather-cron";
 import { startScratchRefreshCron } from "./services/scratch-refresh-cron";
+import { startResultsPollerCron, autoGradeRace } from "./services/results-poller-cron";
+import { fetchOtbResults } from "./services/otb-results";
 import { refreshScratchesForCard, isScratchRefreshError } from "./services/scratch-refresh";
 import { brisnetAdminRouter } from "./routes/brisnet";
 import { manualIngestRouter } from "./routes/manual-ingest";
@@ -96,6 +98,10 @@ export async function registerRoutes(
   // 15-min scratch refresh for locked cards during racing hours (PR #20). Reads
   // each card's stored source roster and flags missing horses as scratched.
   startScratchRefreshCron();
+  // 5-min OTB auto-grader (PR #44): grades active-card races 5 min past post
+  // from offtrackbetting.com and updates each card's bankroll. Kill switch:
+  // OTB_POLL_DISABLED=1.
+  startResultsPollerCron();
 
   // PR #43: gate every mutating /api request behind the admin PIN. Registered
   // before any app.post/put/patch/delete so all of them inherit it; GET
@@ -176,6 +182,92 @@ export async function registerRoutes(
     res.status(201).json(created);
   });
 
+  // ── Bankroll ledger (PR #44) ──────────────────────────────────────────────
+  // Per-card running bankroll ($1k seed + race grades + manual adjusts).
+  app.get("/api/cards/:id/bankroll", (req, res) => {
+    const id = Number(req.params.id);
+    if (!storage.getCard(id)) return res.status(404).json({ error: "Card not found" });
+    res.json(storage.getCardBankroll(id));
+  });
+
+  const bankrollAdjustSchema = z.object({
+    delta: z.number(),
+    note: z.string().optional(),
+  });
+  app.post("/api/cards/:id/bankroll/adjust", (req, res) => {
+    const id = Number(req.params.id);
+    if (!storage.getCard(id)) return res.status(404).json({ error: "Card not found" });
+    const parsed = bankrollAdjustSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+    storage.adjustCardBankroll(id, parsed.data.delta, parsed.data.note);
+    broadcastEvent("card_updated", { cardId: id, source: "bankroll-adjust" });
+    res.json(storage.getCardBankroll(id));
+  });
+
+  // ── PR #44: one-time cleanup of a card's dirty results ────────────────────
+  // Wipes ALL result rows for every race on the card, then re-fetches from OTB
+  // and upserts canonical rows. Built so the user can fix Card #9's duplicate
+  // result rows from the browser without Railway shell access. Admin-pin gated
+  // (POST under /api) PLUS an explicit confirm token to prevent an accidental
+  // wipe. Races OTB does not yet show as official stay ungraded.
+  const cleanupSchema = z.object({ confirm: z.literal("wipe-and-refetch") });
+  app.post("/api/admin/cleanup-card-results/:cardId", async (req, res) => {
+    const cardId = Number(req.params.cardId);
+    const parsed = cleanupSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Confirmation required: send { "confirm": "wipe-and-refetch" }',
+      });
+    }
+    const card = storage.getCard(cardId);
+    if (!card) return res.status(404).json({ error: "Card not found" });
+
+    const cardRaces = storage.getRacesByCard(cardId);
+    const before: Record<number, boolean> = {};
+    for (const r of cardRaces) {
+      before[r.raceNumber] = !!storage.getResultByRace(r.id);
+      storage.deleteResult(r.id);
+    }
+
+    const otb = await fetchOtbResults(card.track, card.date);
+    const graded: number[] = [];
+    const skipped: number[] = [];
+    if (otb) {
+      for (const r of cardRaces) {
+        const match = otb.races.find((m) => m.raceNumber === r.raceNumber);
+        if (match && match.isOfficial && match.finishOrder.length > 0) {
+          storage.logResult(r.id, match.finishOrder, {
+            autoFetched: true,
+            winPayout: match.winPayout ?? null,
+            placePayout: match.placePayout ?? null,
+            showPayout: match.showPayout ?? null,
+            exactaPayout: match.exactaPayout ?? null,
+            trifectaPayout: match.trifectaPayout ?? null,
+            superfectaPayout: match.superfectaPayout ?? null,
+            payoutsRaw: JSON.stringify(match.payoutsRaw),
+          });
+          graded.push(r.raceNumber);
+        } else {
+          skipped.push(r.raceNumber);
+        }
+      }
+    }
+    broadcastEvent("card_updated", { cardId, source: "cleanup" });
+    res.json({
+      ok: true,
+      cardId,
+      track: card.track,
+      date: card.date,
+      otbReachable: !!otb,
+      hadResultBefore: before,
+      graded,
+      skippedUngraded: skipped,
+      bankroll: storage.getCardBankroll(cardId),
+    });
+  });
+
   // Patch a card (e.g. { locked: true }).
   app.patch("/api/cards/:id", (req, res) => {
     const id = Number(req.params.id);
@@ -238,6 +330,46 @@ export async function registerRoutes(
       return res.status(404).json({ error: "No graded result for this race — grade it first." });
     }
     res.json(updated);
+  });
+
+  // Clear a race's result (PR #44). Removes the result row + un-grades this
+  // race's live bet legs + drops its bankroll race-grade event. 204 on success,
+  // 404 when there was no result. Admin-pin gated (DELETE under /api).
+  app.delete("/api/races/:id/result", (req, res) => {
+    const raceId = Number(req.params.id);
+    const race = storage.getRace(raceId);
+    if (!race) return res.status(404).json({ error: "Race not found" });
+    const lockedCard = storage.getCard(race.cardId);
+    if (lockedCard?.status === "completed") {
+      return res.status(409).json({ error: "Card is completed (read-only). Unlock it in Settings to edit results." });
+    }
+    const removed = storage.deleteResult(raceId);
+    if (!removed) return res.status(404).json({ error: "No result to clear for this race" });
+    broadcastEvent("card_updated", { cardId: race.cardId, source: "result-cleared" });
+    res.status(204).end();
+  });
+
+  // Auto-grade ONE race from OTB on demand (PR #44 "Refresh from OTB" button).
+  // Fetches the race's card track/date page and upserts that race's official
+  // result. Returns the refreshed card on success, or a 200 status object when
+  // OTB has no official result yet (so the UI can toast "not final yet").
+  app.post("/api/races/:id/auto-grade", async (req, res) => {
+    const raceId = Number(req.params.id);
+    const race = storage.getRace(raceId);
+    if (!race) return res.status(404).json({ error: "Race not found" });
+    const lockedCard = storage.getCard(race.cardId);
+    if (lockedCard?.status === "completed") {
+      return res.status(409).json({ error: "Card is completed (read-only). Unlock it in Settings to edit results." });
+    }
+    try {
+      const out = await autoGradeRace(raceId);
+      if (out.graded) {
+        return res.json({ graded: true, raceNumber: out.raceNumber, card: storage.getCardWithRaces(race.cardId) });
+      }
+      return res.json({ graded: false, reason: out.reason, raceNumber: out.raceNumber });
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
   });
 
   // Update editable analysis text on a race.

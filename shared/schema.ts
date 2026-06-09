@@ -151,6 +151,27 @@ export const raceEvents = sqliteTable("race_events", {
 
 export type RaceEventRow = typeof raceEvents.$inferSelect;
 
+// ── Bankroll ledger (PR #44) ──────────────────────────────────────────────
+// Append-only per-card money ledger. Each card seeds with a `card-start` event
+// of +$1000 (the daily risk budget) on create; every graded race appends a
+// `race-grade` event whose delta = sum of leg payouts − sum of leg costs for
+// that race. runningBalance is the post-event balance, denormalized so the
+// header pill reads without re-summing. Manual adjustments use `manual-adjust`.
+export const bankrollEvents = sqliteTable("bankroll_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  cardId: integer("card_id")
+    .notNull()
+    .references(() => cards.id, { onDelete: "cascade" }),
+  raceId: integer("race_id").references(() => races.id, { onDelete: "cascade" }),
+  source: text("source").notNull(), // 'race-grade' | 'manual-adjust' | 'card-start' | 'bet-placed'
+  delta: real("delta").notNull(), // positive = winnings, negative = stake
+  runningBalance: real("running_balance").notNull(),
+  note: text("note"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type BankrollEventRow = typeof bankrollEvents.$inferSelect;
+
 // ── Card summaries (PR #41) ───────────────────────────────────────────────
 // Frozen per-card analytics roll-up, written when the card is marked complete.
 // Caches the final ROI/win-rate/ITM-rate + per-tier breakdown so completed

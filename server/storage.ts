@@ -20,6 +20,7 @@ import {
   betLegs,
   raceEvents,
   cardSummaries,
+  bankrollEvents,
 } from "@shared/schema";
 import type {
   Card,
@@ -74,6 +75,14 @@ import {
   type RaceBets as BudgetedRaceBets,
 } from "./services/budgeted-bets";
 import { getBloodstockForCard } from "./services/brisnet-ingest";
+import {
+  seedCardBankroll,
+  recordRaceGrade,
+  appendBankrollEvent,
+  getCardBalance,
+  getCardLedger,
+} from "./services/bankroll";
+import type { BankrollEventRow } from "@shared/schema";
 
 export interface IStorage {
   // Cards
@@ -102,6 +111,11 @@ export interface IStorage {
   getResultByRace(raceId: number): Result | undefined;
   logResult(raceId: number, finishOrder: string[], opts?: Partial<Result>): Result;
   updateResultPayouts(raceId: number, payouts: Partial<Result>): Result | undefined;
+  deleteResult(raceId: number): boolean;
+
+  // Bankroll ledger (PR #44)
+  getCardBankroll(cardId: number): { balance: number; events: BankrollEventRow[] };
+  adjustCardBankroll(cardId: number, delta: number, note?: string): BankrollEventRow;
 
   // Bet ledger (PR #40)
   getBetLegsByCard(cardId: number): BetLegRow[];
@@ -378,6 +392,8 @@ export class DatabaseStorage implements IStorage {
     for (const r of raceRows) {
       db.insert(races).values({ ...r, cardId: created.id }).run();
     }
+    // Seed this card's $1k bankroll ledger (PR #44). Idempotent.
+    seedCardBankroll(created.id);
     return this.withRaces(created);
   }
 
@@ -544,6 +560,9 @@ export class DatabaseStorage implements IStorage {
       .get();
     // Reconcile the bet_legs ledger with this grade + any payouts entered.
     this.applyResultToLedger(raceId, row);
+    // Record the race's net on the card's bankroll ledger (PR #44). Idempotent
+    // per (card, race) — a re-grade/payout backfill replaces the prior event.
+    recordRaceGrade(race.cardId, raceId, `R${race.raceNumber} graded`);
     return row;
   }
 
@@ -564,8 +583,47 @@ export class DatabaseStorage implements IStorage {
     }
     db.update(results).set(patch).where(eq(results.raceId, raceId)).run();
     const row = this.getResultByRace(raceId);
-    if (row) this.applyResultToLedger(raceId, row);
+    if (row) {
+      this.applyResultToLedger(raceId, row);
+      const race = this.getRace(raceId);
+      if (race) recordRaceGrade(race.cardId, raceId, `R${race.raceNumber} payouts`);
+    }
     return row;
+  }
+
+  // Delete a race's result row (PR #44). Returns true if a row was removed. The
+  // bankroll ledger's race-grade event for this race is removed too so the
+  // running balance reflects the cleared result. Bet legs keep their generated
+  // cost but lose their hit/payout grade (set back to null) so a later re-grade
+  // re-reconciles cleanly.
+  deleteResult(raceId: number): boolean {
+    const existing = this.getResultByRace(raceId);
+    if (!existing) return false;
+    const race = this.getRace(raceId);
+    db.delete(results).where(eq(results.raceId, raceId)).run();
+    db.update(betLegs)
+      .set({ hit: null, payout: null })
+      .where(and(eq(betLegs.raceId, raceId), eq(betLegs.refunded, false)))
+      .run();
+    if (race) {
+      db.delete(bankrollEvents)
+        .where(and(eq(bankrollEvents.raceId, raceId), eq(bankrollEvents.source, "race-grade")))
+        .run();
+    }
+    return true;
+  }
+
+  // ── Bankroll ledger (PR #44) ──────────────────────────────────────────────
+  getCardBankroll(cardId: number): { balance: number; events: BankrollEventRow[] } {
+    // Self-heal: a card created before PR #44 has no seed event. Seed it lazily
+    // so its balance starts from $1000 rather than $0.
+    seedCardBankroll(cardId);
+    return { balance: getCardBalance(cardId), events: getCardLedger(cardId) };
+  }
+
+  adjustCardBankroll(cardId: number, delta: number, note?: string): BankrollEventRow {
+    seedCardBankroll(cardId);
+    return appendBankrollEvent(cardId, null, "manual-adjust", delta, note);
   }
 
   // ── Bet ledger (PR #40) ───────────────────────────────────────────────────

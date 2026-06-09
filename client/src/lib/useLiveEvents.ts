@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useJarvis } from "@/lib/jarvis";
 import { queryClient } from "@/lib/queryClient";
+import { toast } from "@/hooks/use-toast";
 
 const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 
@@ -28,6 +29,22 @@ export function useLiveEvents() {
               `Race ${event.raceNumber ?? event.raceId} recap`,
             );
           }
+        } else if (event.type === "race-graded") {
+          // PR #44: OTB auto-grader landed a result. Refresh the card + bankroll
+          // and toast the winner + net.
+          queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/cards"] });
+          if (event.cardId != null) {
+            queryClient.invalidateQueries({ queryKey: ["/api/cards", String(event.cardId), "bankroll"] });
+          }
+          const winner = event.winnerName
+            ? `#${event.winnerPgm} ${event.winnerName}`
+            : `#${event.winnerPgm}`;
+          const bal = typeof event.balance === "number" ? ` — bankroll $${event.balance.toFixed(2)}` : "";
+          toast({
+            title: `R${event.raceNumber ?? ""} graded`,
+            description: `Winner ${winner}${bal}`,
+          });
         } else if (event.type === "tuning_proposals") {
           queryClient.invalidateQueries({ queryKey: ["/api/tuning-proposals"] });
         } else if (event.type === "card_updated") {
