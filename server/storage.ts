@@ -18,6 +18,8 @@ import {
   raceWeather,
   deepPostmortems,
   betLegs,
+  raceEvents,
+  cardSummaries,
 } from "@shared/schema";
 import type {
   Card,
@@ -55,6 +57,9 @@ import type {
   DeepPostmortemRow,
   DeepPostmortem,
   BetLegRow,
+  RaceEventRow,
+  CardSummaryRow,
+  CardSummaryTier,
 } from "@shared/schema";
 import type { PedigreeSummary } from "@shared/schema";
 import { db } from "./db";
@@ -100,6 +105,16 @@ export interface IStorage {
   // Bet ledger (PR #40)
   getBetLegsByCard(cardId: number): BetLegRow[];
   getAllBetLegs(): BetLegRow[];
+
+  // Scratch + re-tier (PR #41)
+  setHorseScratched(raceId: number, pgm: string, scratched: boolean): Race | undefined;
+  reTier(raceId: number): Race | undefined;
+  getRaceEvents(raceId: number): RaceEventRow[];
+
+  // Card completion (PR #41)
+  completeCard(cardId: number): CardSummaryRow | undefined;
+  unlockCard(cardId: number): Card | undefined;
+  getCardSummary(cardId: number): CardSummaryRow | undefined;
 
   // Settings
   getSettings(): Settings;
@@ -178,6 +193,19 @@ export interface IStorage {
   getDeepPostmortem(cardId: number): DeepPostmortem | null;
 }
 
+// Tolerant JSON string-array parse for columns like races.scratched_pgms /
+// races.flags. Never throws — a malformed value resolves to an empty array.
+function parseStringArrayField(v: unknown): string[] {
+  if (Array.isArray(v)) return v.map(String);
+  if (typeof v !== "string" || !v.trim()) return [];
+  try {
+    const parsed = JSON.parse(v);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
 // Map a persisted race_weather row to the RaceWeather API/engine shape.
 function rowToRaceWeather(row: RaceWeatherRow): RaceWeather {
   return {
@@ -238,6 +266,7 @@ export class DatabaseStorage implements IStorage {
         bets,
         weather: this.getRaceWeather(r.id),
         pedigree: this.buildPedigree(r.id, r.raceNumber, pedigreeNames),
+        events: this.getRaceEvents(r.id),
       };
     });
 
@@ -548,7 +577,14 @@ export class DatabaseStorage implements IStorage {
   // Legs whose position the pick missed get hit=false, payout=0. When a payoff
   // wasn't entered the leg is marked hit but payout stays null (unknown return).
   private applyResultToLedger(raceId: number, result: Result): void {
-    const legs = db.select().from(betLegs).where(eq(betLegs.raceId, raceId)).all();
+    // Refunded legs (PR #41) are settled — they were refunded when the race was
+    // re-tiered after a scratch, so they must NOT be re-graded against the new
+    // finish order. Only reconcile the live (non-refunded) legs.
+    const legs = db
+      .select()
+      .from(betLegs)
+      .where(and(eq(betLegs.raceId, raceId), eq(betLegs.refunded, false)))
+      .all();
     if (legs.length === 0) return;
     const hitForLeg = (legType: string): boolean | null => {
       switch (legType) {
@@ -584,6 +620,289 @@ export class DatabaseStorage implements IStorage {
       }
       db.update(betLegs).set({ hit, payout }).where(eq(betLegs.id, leg.id)).run();
     }
+  }
+
+  // ── Scratch + re-tier (PR #41) ────────────────────────────────────────────
+  // Toggle a horse's scratched state for a race, then re-tier. The race's
+  // scratched_pgms JSON array is the authoritative per-race scratch set (there
+  // is no horses table). We also flip the matching prediction row's scratched
+  // flag (when one exists) so the rating-based re-rank in reTier() and the
+  // existing scratch-refresh path agree. Idempotent: scratching an already-
+  // scratched pgm (or un-scratching a clean one) is a no-op beyond re-tiering.
+  setHorseScratched(raceId: number, pgm: string, scratched: boolean): Race | undefined {
+    const race = this.getRace(raceId);
+    if (!race) return undefined;
+    const current = parseStringArrayField(race.scratchedPgms);
+    const set = new Set(current);
+    if (scratched) set.add(pgm);
+    else set.delete(pgm);
+    db.update(races)
+      .set({ scratchedPgms: JSON.stringify(Array.from(set)) })
+      .where(eq(races.id, raceId))
+      .run();
+    // Keep prediction-level flag in sync where a prediction exists for this pgm.
+    const nowIso = new Date().toISOString();
+    const pred = this.getPredictionsByRace(raceId).find((p) => p.horsePgm === pgm);
+    if (pred) {
+      this.updatePrediction(pred.id, {
+        scratched,
+        scratchedAt: scratched ? nowIso : null,
+      });
+    }
+    return this.reTier(raceId);
+  }
+
+  // Re-rank a race's surviving (non-scratched) runners into Win/Place/Show/4th,
+  // rebuild this race's budgeted bets + ledger (refunding the OLD legs), and log
+  // a SCRATCH race_event. Pure re-tier of ONE race; the rest of the card's bets
+  // are untouched (each race's budget is independent in the allocator). Safe to
+  // call repeatedly — refunds are keyed on the live legs, so a re-tier always
+  // refunds whatever is currently live and writes a fresh live set.
+  reTier(raceId: number): Race | undefined {
+    const race = this.getRace(raceId);
+    if (!race) return undefined;
+    const card = this.getCard(race.cardId);
+    if (!card) return race;
+
+    const scratched = new Set(parseStringArrayField(race.scratchedPgms));
+    const oldPicks = {
+      win: race.winPgm, place: race.placePgm, show: race.showPgm, fourth: race.fourthPgm,
+    };
+
+    // Build the new ranked pick order from surviving runners.
+    const round1 = (x: number | null | undefined) => (x == null ? null : Math.round(x * 10) / 10);
+    const preds = this.getPredictionsByRace(raceId).filter(
+      (p) => p.eeaRating != null && !scratched.has(p.horsePgm) && !p.scratched,
+    );
+    let picksPatch: Partial<Race>;
+    if (preds.length > 0) {
+      // Rating-based re-rank (best signal). Mirrors recomputeTierIfNeeded.
+      const survivors = preds.sort(
+        (a, b) => (b.eeaRating ?? -Infinity) - (a.eeaRating ?? -Infinity),
+      );
+      const s = (i: number) => survivors[i];
+      picksPatch = {
+        winPgm: s(0)?.horsePgm ?? null, winName: s(0)?.horseName ?? null, winScore: round1(s(0)?.eeaRating),
+        placePgm: s(1)?.horsePgm ?? null, placeName: s(1)?.horseName ?? null, placeScore: round1(s(1)?.eeaRating),
+        showPgm: s(2)?.horsePgm ?? null, showName: s(2)?.horseName ?? null, showScore: round1(s(2)?.eeaRating),
+        fourthPgm: s(3)?.horsePgm ?? null, fourthName: s(3)?.horseName ?? null, fourthScore: round1(s(3)?.eeaRating),
+      };
+    } else {
+      // No predictions (manual-ingest card): there's no rating to re-rank by, so
+      // we restore from a one-time BASELINE snapshot of the original four picks.
+      // The baseline is captured the first time this race is ever re-tiered (when
+      // the picks are still pristine) and never overwritten, so every subsequent
+      // scratch/un-scratch is just "baseline filtered by the current scratch set"
+      // — making un-scratch fully reversible even on prediction-less cards.
+      const baseline = this.ensurePickBaseline(raceId, race);
+      const slots = baseline.filter((p) => p.pgm && !scratched.has(p.pgm));
+      const s = (i: number) => slots[i];
+      picksPatch = {
+        winPgm: s(0)?.pgm ?? null, winName: s(0)?.name ?? null, winScore: s(0)?.score ?? null,
+        placePgm: s(1)?.pgm ?? null, placeName: s(1)?.name ?? null, placeScore: s(1)?.score ?? null,
+        showPgm: s(2)?.pgm ?? null, showName: s(2)?.name ?? null, showScore: s(2)?.score ?? null,
+        fourthPgm: s(3)?.pgm ?? null, fourthName: s(3)?.name ?? null, fourthScore: s(3)?.score ?? null,
+      };
+    }
+    db.update(races).set(picksPatch).where(eq(races.id, raceId)).run();
+
+    // Rebuild this race's bets + ledger. Refund the currently-live legs first.
+    this.rebuildRaceLedger(race.cardId, raceId, card.betBudgetVersion ?? 1);
+
+    // Log the SCRATCH event with the old/new pick diff for the history panel.
+    const fresh = this.getRace(raceId)!;
+    const newPicks = {
+      win: fresh.winPgm, place: fresh.placePgm, show: fresh.showPgm, fourth: fresh.fourthPgm,
+    };
+    db.insert(raceEvents)
+      .values({
+        raceId,
+        type: scratched.size > 0 ? "SCRATCH" : "UNSCRATCH",
+        payloadJson: JSON.stringify({
+          scratched: Array.from(scratched),
+          reTieredAt: new Date().toISOString(),
+          oldPicks,
+          newPicks,
+        }),
+      })
+      .run();
+    return fresh;
+  }
+
+  // Return the pristine original four picks for a prediction-less race, captured
+  // once as a BASELINE race_event the first time the race is re-tiered. On the
+  // first call the current (still-pristine) picks are snapshotted; thereafter the
+  // stored snapshot is returned verbatim so scratch/un-scratch is reversible.
+  private ensurePickBaseline(
+    raceId: number,
+    race: Race,
+  ): { pgm: string | null; name: string | null; score: number | null }[] {
+    const existing = db
+      .select()
+      .from(raceEvents)
+      .where(and(eq(raceEvents.raceId, raceId), eq(raceEvents.type, "BASELINE")))
+      .get();
+    if (existing) {
+      try {
+        const slots = JSON.parse(existing.payloadJson || "[]");
+        if (Array.isArray(slots)) return slots;
+      } catch {
+        /* fall through to re-snapshot */
+      }
+    }
+    const slots = [
+      { pgm: race.winPgm, name: race.winName, score: race.winScore },
+      { pgm: race.placePgm, name: race.placeName, score: race.placeScore },
+      { pgm: race.showPgm, name: race.showName, score: race.showScore },
+      { pgm: race.fourthPgm, name: race.fourthName, score: race.fourthScore },
+    ];
+    db.insert(raceEvents)
+      .values({ raceId, type: "BASELINE", payloadJson: JSON.stringify(slots) })
+      .run();
+    return slots;
+  }
+
+  // Refund this race's live bet_legs and write a fresh live set from the rebuilt
+  // bets. Old legs are marked refunded (not deleted) so ROI excludes their cost
+  // without counting them as losses, and the audit trail survives. New legs are
+  // reconciled against the result if the race is already graded.
+  private rebuildRaceLedger(cardId: number, raceId: number, betBudgetVersion: number): void {
+    const nowIso = new Date().toISOString();
+    db.update(betLegs)
+      .set({ refunded: true, scratchedAt: nowIso })
+      .where(and(eq(betLegs.raceId, raceId), eq(betLegs.refunded, false)))
+      .run();
+
+    const race = this.getRace(raceId);
+    if (!race) return;
+    const s = this.getSettings();
+    let bets: BudgetedRaceBets | undefined;
+    if ((betBudgetVersion ?? 1) >= 2) {
+      bets = buildBudgetedBets([race], configFromSettings(s)).get(raceId);
+    } else {
+      const racesOnCard = this.getRacesByCard(cardId).length;
+      bets = buildWagers(
+        race,
+        { bankroll: s.bankroll, dailyRiskCapPct: s.dailyRiskCapPct },
+        racesOnCard,
+      ) as unknown as BudgetedRaceBets;
+    }
+    const legs = bets?.legs ?? [];
+    const flagsJson = race.flags || "[]";
+    for (const leg of legs) {
+      db.insert(betLegs)
+        .values({
+          raceId,
+          cardId,
+          tier: bets?.tier ?? race.tier,
+          legType: leg.type,
+          structure: leg.structure,
+          cost: leg.cost,
+          payout: null,
+          hit: null,
+          flagsJson,
+          refunded: false,
+        })
+        .run();
+    }
+    const result = this.getResultByRace(raceId);
+    if (result) this.applyResultToLedger(raceId, result);
+  }
+
+  getRaceEvents(raceId: number): RaceEventRow[] {
+    return db
+      .select()
+      .from(raceEvents)
+      .where(eq(raceEvents.raceId, raceId))
+      .all()
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  }
+
+  // ── Card completion (PR #41) ──────────────────────────────────────────────
+  // Freeze a card: flip status→completed, stamp completedAt, and write the
+  // frozen ROI roll-up to card_summaries. Read-only enforcement (rejecting
+  // grading/payouts) lives at the route layer. Idempotent: re-completing
+  // recomputes the summary off the current ledger.
+  completeCard(cardId: number): CardSummaryRow | undefined {
+    const card = this.getCard(cardId);
+    if (!card) return undefined;
+    // Materialize the ledger for this card so the roll-up sees every leg.
+    this.getCardWithRaces(cardId);
+    db.update(cards)
+      .set({ status: "completed", completedAt: new Date().toISOString(), locked: true })
+      .where(eq(cards.id, cardId))
+      .run();
+    return this.computeCardSummary(cardId);
+  }
+
+  // Re-enable editing on a completed card (Settings admin escape hatch). Returns
+  // the card to "active"; the frozen card_summaries row is left in place until
+  // the card is completed again (which recomputes it).
+  unlockCard(cardId: number): Card | undefined {
+    const card = this.getCard(cardId);
+    if (!card) return undefined;
+    db.update(cards)
+      .set({ status: "active", completedAt: null })
+      .where(eq(cards.id, cardId))
+      .run();
+    return this.getCard(cardId);
+  }
+
+  getCardSummary(cardId: number): CardSummaryRow | undefined {
+    return db.select().from(cardSummaries).where(eq(cardSummaries.cardId, cardId)).get();
+  }
+
+  // Aggregate the card's live (non-refunded), settled ledger into a frozen
+  // summary. ROI% = (payout - cost) / cost over settled legs. Win/ITM rates come
+  // off graded race rows. Upserts the card_summaries row.
+  private computeCardSummary(cardId: number): CardSummaryRow {
+    const legs = this.getBetLegsByCard(cardId).filter((l) => !l.refunded && l.hit !== null);
+    const totalCost = legs.reduce((a, l) => a + l.cost, 0);
+    const totalPayout = legs.reduce((a, l) => a + (l.payout ?? 0), 0);
+    const roiPct =
+      totalCost > 0 ? Math.round(((totalPayout - totalCost) / totalCost) * 1000) / 10 : null;
+
+    const raceRows = this.getRacesByCard(cardId);
+    const graded = raceRows
+      .map((r) => this.getResultByRace(r.id))
+      .filter((r): r is Result => !!r);
+    const winHits = graded.filter((r) => r.winHit).length;
+    const winRate = graded.length > 0 ? Math.round((winHits / graded.length) * 1000) / 10 : null;
+    const itmSlots = graded.reduce((a, r) => a + (r.itmCount ?? 0), 0);
+    const itmRate =
+      graded.length > 0 ? Math.round((itmSlots / (graded.length * 4)) * 1000) / 10 : null;
+
+    // Per-tier breakdown off the same settled, live legs.
+    const tierMap = new Map<string, CardSummaryTier>();
+    for (const l of legs) {
+      const t = tierMap.get(l.tier) ?? { tier: l.tier, cost: 0, payout: 0, roi: null, legs: 0 };
+      t.cost += l.cost;
+      t.payout += l.payout ?? 0;
+      t.legs += 1;
+      tierMap.set(l.tier, t);
+    }
+    const tierBreakdown = Array.from(tierMap.values()).map((t) => ({
+      ...t,
+      cost: Math.round(t.cost * 100) / 100,
+      payout: Math.round(t.payout * 100) / 100,
+      roi: t.cost > 0 ? Math.round(((t.payout - t.cost) / t.cost) * 1000) / 10 : null,
+    }));
+
+    const row = {
+      cardId,
+      totalCost: Math.round(totalCost * 100) / 100,
+      totalPayout: Math.round(totalPayout * 100) / 100,
+      roiPct,
+      winRate,
+      itmRate,
+      tierBreakdownJson: JSON.stringify(tierBreakdown),
+      computedAt: new Date().toISOString(),
+    };
+    db.insert(cardSummaries)
+      .values(row)
+      .onConflictDoUpdate({ target: cardSummaries.cardId, set: row })
+      .run();
+    return db.select().from(cardSummaries).where(eq(cardSummaries.cardId, cardId)).get()!;
   }
 
   // ── Daily Show ──────────────────────────────────────────────────────────

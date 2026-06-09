@@ -111,6 +111,28 @@ CREATE TABLE IF NOT EXISTS bet_legs (
 CREATE INDEX IF NOT EXISTS idx_bet_legs_race ON bet_legs(race_id);
 CREATE INDEX IF NOT EXISTS idx_bet_legs_card ON bet_legs(card_id);
 
+-- Race events (PR #41). Append-only audit log of in-race operations (SCRATCH).
+CREATE TABLE IF NOT EXISTS race_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  race_id INTEGER NOT NULL REFERENCES races(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_race_events_race ON race_events(race_id);
+
+-- Card summaries (PR #41). Frozen per-card ROI roll-up, written on completion.
+CREATE TABLE IF NOT EXISTS card_summaries (
+  card_id INTEGER PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
+  total_cost REAL NOT NULL DEFAULT 0,
+  total_payout REAL NOT NULL DEFAULT 0,
+  roi_pct REAL,
+  win_rate REAL,
+  itm_rate REAL,
+  tier_breakdown_json TEXT NOT NULL DEFAULT '{}',
+  computed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   bankroll REAL NOT NULL DEFAULT 2000,
@@ -472,6 +494,8 @@ addCardCol("archived_at", "archived_at TEXT");
 // so they default to 1 (legacy flat builder) and keep their bets AS-IS. New
 // cards are inserted explicitly with version 2 (BudgetedBetBuilder).
 addCardCol("bet_budget_version", "bet_budget_version INTEGER NOT NULL DEFAULT 1");
+// PR #41: card completion lock-out timestamp (status flips to 'completed').
+addCardCol("completed_at", "completed_at TEXT");
 
 // Idempotent races-column migration for the postmortem flag-driven tier
 // demotion (Card 1 Saratoga 2026-06-07 postmortem). Nullable; only set when a
@@ -488,6 +512,22 @@ if (!racesCols.has("tier_demoted_by")) {
 // sorting/comparison. races.post stays the track-local display string.
 if (!racesCols.has("post_time_utc")) {
   sqlite.exec("ALTER TABLE races ADD COLUMN post_time_utc TEXT");
+}
+// PR #41: per-race manually-scratched program numbers (JSON array string).
+if (!racesCols.has("scratched_pgms")) {
+  sqlite.exec("ALTER TABLE races ADD COLUMN scratched_pgms TEXT NOT NULL DEFAULT '[]'");
+}
+
+// Idempotent bet_legs-column migration for PR #41: refund flag + timestamp set
+// when a scratch re-tiers a race and the old picks' legs are refunded.
+const betLegsCols = new Set(
+  (sqlite.prepare("PRAGMA table_info(bet_legs)").all() as { name: string }[]).map((c) => c.name),
+);
+if (!betLegsCols.has("refunded")) {
+  sqlite.exec("ALTER TABLE bet_legs ADD COLUMN refunded INTEGER NOT NULL DEFAULT 0");
+}
+if (!betLegsCols.has("scratched_at")) {
+  sqlite.exec("ALTER TABLE bet_legs ADD COLUMN scratched_at TEXT");
 }
 
 // Idempotent results-column migration for PR #40: per-race win odds at post.

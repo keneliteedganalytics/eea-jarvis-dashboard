@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Mic, Flag, Check, X, Save } from "lucide-react";
+import { ArrowLeft, Mic, Flag, Check, X, Save, Ban, RotateCcw } from "lucide-react";
 
 const PACE_LANES = ["E", "E/P", "P", "S"];
 
@@ -58,7 +58,7 @@ function PaceDiagram({ race }: { race: RaceWithResult }) {
   );
 }
 
-function PickEditor({ race }: { race: RaceWithResult }) {
+function PickEditor({ race, locked }: { race: RaceWithResult; locked: boolean }) {
   const { toast } = useToast();
   const [why, setWhy] = useState(race.whyText ?? "");
   const [pace, setPace] = useState(race.paceText ?? "");
@@ -78,6 +78,31 @@ function PickEditor({ race }: { race: RaceWithResult }) {
     },
   });
 
+  const scratched = new Set<string>(
+    (() => {
+      try {
+        const j = JSON.parse(race.scratchedPgms ?? "[]");
+        return Array.isArray(j) ? j.map(String) : [];
+      } catch {
+        return [];
+      }
+    })(),
+  );
+
+  const scratch = useMutation({
+    mutationFn: async (vars: { pgm: string; scratched: boolean }) => {
+      await apiRequest("POST", `/api/races/${race.id}/scratch`, vars);
+    },
+    onSuccess: (_d, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] });
+      toast({
+        title: vars.scratched ? "Horse scratched" : "Horse reinstated",
+        description: `Race ${race.raceNumber} re-tiered · #${vars.pgm}.`,
+      });
+    },
+    onError: (e: Error) => toast({ title: "Scratch failed", description: e.message, variant: "destructive" }),
+  });
+
   const picks = [
     { slot: "WIN", pgm: race.winPgm, name: race.winName, score: race.winScore, hit: race.result?.winHit },
     { slot: "PLACE", pgm: race.placePgm, name: race.placeName, score: race.placeScore, hit: race.result?.placeHit },
@@ -87,8 +112,10 @@ function PickEditor({ race }: { race: RaceWithResult }) {
 
   return (
     <div className="space-y-3">
-      {picks.map((p) => (
-        <div key={p.slot} className="rounded-lg border border-gold/15 bg-navy-card p-3" data-testid={`detail-pick-${p.slot}`}>
+      {picks.map((p) => {
+        const isScratched = !!p.pgm && scratched.has(p.pgm);
+        return (
+        <div key={p.slot} className={`rounded-lg border p-3 ${isScratched ? "border-loss/25 bg-navy-card/50 opacity-60" : "border-gold/15 bg-navy-card"}`} data-testid={`detail-pick-${p.slot}`}>
           <div className="flex items-center justify-between">
             <span className="text-[10px] uppercase tracking-[0.16em] text-gold-dark font-display font-bold">{p.slot}</span>
             {p.hit != null && (
@@ -96,17 +123,32 @@ function PickEditor({ race }: { race: RaceWithResult }) {
             )}
           </div>
           <div className="mt-1 flex items-baseline gap-2">
-            <span className="text-gold-light font-display font-black text-lg tabular-nums">#{p.pgm}</span>
-            <span className="text-silver text-sm truncate">{p.name}</span>
-            {p.pgm && (
+            <span className={`font-display font-black text-lg tabular-nums ${isScratched ? "text-loss line-through" : "text-gold-light"}`}>#{p.pgm}</span>
+            <span className={`text-sm truncate ${isScratched ? "text-muted-brand line-through" : "text-silver"}`}>{p.name}</span>
+            {p.pgm && !isScratched && (
               <span className="self-center">
                 <PedigreeChip pedigree={race.pedigree?.[p.pgm]} />
               </span>
             )}
             <span className="ml-auto text-gold font-display font-bold tabular-nums">{p.score?.toFixed(1)}</span>
           </div>
+          {p.pgm && !locked && (
+            <div className="mt-2 flex justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={scratch.isPending}
+                onClick={() => scratch.mutate({ pgm: p.pgm!, scratched: !isScratched })}
+                className={`h-7 px-2 text-[11px] ${isScratched ? "border-gold/30 text-gold hover:bg-gold/10" : "border-loss/30 text-loss hover:bg-loss/10"}`}
+                data-testid={`button-scratch-${p.slot}`}
+              >
+                {isScratched ? <><RotateCcw className="h-3 w-3 mr-1" /> Un-scratch</> : <><Ban className="h-3 w-3 mr-1" /> Scratch</>}
+              </Button>
+            </div>
+          )}
         </div>
-      ))}
+        );
+      })}
 
       <div className="rounded-lg border border-gold/10 bg-navy-section p-3 space-y-3">
         <div>
@@ -137,6 +179,43 @@ function PickEditor({ race }: { race: RaceWithResult }) {
         >
           <Save className="h-4 w-4 mr-1.5" /> Save Notes
         </Button>
+      </div>
+    </div>
+  );
+}
+
+function RetierHistory({ race }: { race: RaceWithResult }) {
+  const events = (race.events ?? []).filter((e) => e.type === "SCRATCH" || e.type === "UNSCRATCH");
+  if (events.length === 0) return null;
+  return (
+    <div className="mt-3 rounded-lg border border-gold/10 bg-navy-section p-3" data-testid="retier-history">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-2">Re-tier History</div>
+      <div className="space-y-2">
+        {events.map((e) => {
+          let p: { scratched?: string[]; reTieredAt?: string; oldPicks?: Record<string, string | null>; newPicks?: Record<string, string | null> } = {};
+          try { p = JSON.parse(e.payloadJson || "{}"); } catch { p = {}; }
+          const fmt = (x?: string | null) => (x ? `#${x}` : "—");
+          const shifted =
+            p.oldPicks && p.newPicks
+              ? `WIN ${fmt(p.oldPicks.win)}→${fmt(p.newPicks.win)} · PL ${fmt(p.oldPicks.place)}→${fmt(p.newPicks.place)} · SH ${fmt(p.oldPicks.show)}→${fmt(p.newPicks.show)}`
+              : "";
+          const when = p.reTieredAt ?? e.createdAt;
+          const isUnscratch = e.type === "UNSCRATCH";
+          return (
+            <div key={e.id} className="text-[11px] text-slate-brand tabular-nums">
+              <div className="flex items-center gap-1.5">
+                {isUnscratch ? <RotateCcw className="h-3 w-3 text-gold shrink-0" /> : <Ban className="h-3 w-3 text-loss shrink-0" />}
+                <span className="text-silver">
+                  {isUnscratch
+                    ? `Reinstated · ${p.scratched && p.scratched.length ? `still scratched ${p.scratched.map((s) => `#${s}`).join(", ")}` : "field restored"}`
+                    : `Scratched ${p.scratched && p.scratched.length ? p.scratched.map((s) => `#${s}`).join(", ") : "—"}`}
+                </span>
+                <span className="ml-auto text-muted-brand">{new Date(when).toLocaleString()}</span>
+              </div>
+              {shifted && <div className="pl-4.5 text-muted-brand">{shifted}</div>}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -216,7 +295,8 @@ export default function RaceDetail() {
         {/* Center: picks + editors */}
         <div>
           <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-2">Top 4 Picks</div>
-          <PickEditor race={race} />
+          <PickEditor race={race} locked={card.status === "completed"} />
+          <RetierHistory race={race} />
         </div>
 
         {/* Right: reconciliation + wagers + grading */}
