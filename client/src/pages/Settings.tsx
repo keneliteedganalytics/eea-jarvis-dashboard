@@ -179,6 +179,62 @@ function CompletedCardsSection() {
   );
 }
 
+const ADMIN_PIN_KEY = "eea_admin_pin";
+
+function AdminPinSection() {
+  const { toast } = useToast();
+  const [saved, setSaved] = useState<boolean>(
+    () => !!localStorage.getItem(ADMIN_PIN_KEY),
+  );
+
+  const clear = () => {
+    localStorage.removeItem(ADMIN_PIN_KEY);
+    setSaved(false);
+    toast({ title: "Admin PIN cleared", description: "The next change will prompt for it." });
+  };
+
+  const change = () => {
+    const pin = window.prompt("Admin PIN required to make changes:");
+    if (pin) {
+      localStorage.setItem(ADMIN_PIN_KEY, pin);
+      setSaved(true);
+      toast({ title: "Admin PIN saved in this browser" });
+    }
+  };
+
+  return (
+    <Section title="Admin PIN" desc="Required to make changes. Stored in this browser only.">
+      <div className="flex items-center gap-3 rounded-md border border-gold/15 bg-navy-section p-3" data-testid="admin-pin-status">
+        <span className="text-sm text-silver font-display font-bold tabular-nums">
+          {saved ? "●●●●" : "—"}
+        </span>
+        <span className="text-xs text-muted-brand flex-1">
+          {saved ? "saved in this browser" : "not saved — you'll be prompted on the next change"}
+        </span>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={clear}
+          disabled={!saved}
+          className="border-loss/40 text-loss hover:bg-loss/10"
+          data-testid="button-clear-admin-pin"
+        >
+          Clear
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={change}
+          className="border-gold/30 text-gold hover:bg-gold/10"
+          data-testid="button-change-admin-pin"
+        >
+          Change
+        </Button>
+      </div>
+    </Section>
+  );
+}
+
 export default function Settings() {
   const { data: settings, isLoading } = useQuery<SettingsType>({ queryKey: ["/api/settings"] });
   const { data: liveVoices } = useQuery<LiveVoice[]>({ queryKey: ["/api/voices"], retry: false });
@@ -398,6 +454,9 @@ export default function Settings() {
 
         {/* Auto-tuner proposals */}
         <TuningInbox />
+
+        {/* PR #43: admin PIN status */}
+        <AdminPinSection />
 
         {/* PR #41: completed-card unlock */}
         <CompletedCardsSection />
