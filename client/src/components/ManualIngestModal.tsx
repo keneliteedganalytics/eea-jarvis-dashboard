@@ -81,11 +81,17 @@ export function ManualIngestModal() {
       if (!res.ok) throw new Error(("error" in body && body.error) || "Ingest failed");
       return body as ManualResult;
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       setResult(data);
-      queryClient.invalidateQueries({ queryKey: ["/api/cards/drafts"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/cards"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] });
+      // The dashboard renders the new draft via /api/cards/drafts (DraftCardsSection)
+      // and the active-card via /api/cards/latest. Force a refetch of every card-
+      // and race-list key so the card appears immediately with no page reload.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/cards/drafts"], refetchType: "all" }),
+        queryClient.invalidateQueries({ queryKey: ["/api/cards"], refetchType: "all" }),
+        queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"], refetchType: "all" }),
+        queryClient.invalidateQueries({ queryKey: ["/api/cards/archived"], refetchType: "all" }),
+      ]);
       toast({
         title: `Card #${data.cardId} ingested`,
         description: `${data.raceCount ?? 0} races · conviction ${data.conviction ?? "—"}.`,
