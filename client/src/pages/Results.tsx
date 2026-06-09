@@ -15,6 +15,20 @@ function pct(n: number, d: number): string {
   return `${Math.round((n / d) * 100)}%`;
 }
 
+// Tolerant string-array parse. The API stores flags/finishOrder as JSON strings,
+// but a value may arrive null, already-parsed, or malformed (manual-ingest cards,
+// future serialization changes). Never throw — a bad field must not blank the page.
+function parseStringArray(v: unknown): string[] {
+  if (Array.isArray(v)) return v.map(String);
+  if (typeof v !== "string" || !v.trim()) return [];
+  try {
+    const parsed = JSON.parse(v);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
 // Lifetime stats endpoint contract (server/analytics.ts buildLifetimeStats).
 interface LifetimeStats {
   totals: {
@@ -70,7 +84,7 @@ function ResultEntry({ race, autoRecap }: { race: RaceWithResult; autoRecap: boo
   });
 
   if (race.result) {
-    const order = JSON.parse(race.result.finishOrder) as string[];
+    const order = parseStringArray(race.result.finishOrder);
     const grades: [string, boolean | null][] = [
       ["WIN", race.result.winHit], ["PLACE", race.result.placeHit],
       ["SHOW", race.result.showHit], ["4TH", race.result.fourthHit],
@@ -142,7 +156,8 @@ export default function Results() {
     return <div className="p-6 space-y-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}</div>;
   }
 
-  const withResults = card.races.filter((r) => r.result);
+  const races = card.races ?? [];
+  const withResults = races.filter((r) => r.result);
   const n = withResults.length;
   const sum = (f: (r: RaceWithResult) => boolean | null | undefined) =>
     withResults.filter((r) => f(r)).length;
@@ -158,10 +173,10 @@ export default function Results() {
 
   // Flag accuracy across the card
   const flagRows: { flag: string; raceNumber: number; hit: boolean }[] = [];
-  for (const r of card.races) {
-    const flags = JSON.parse(r.flags || "[]") as string[];
+  for (const r of card.races ?? []) {
+    const flags = parseStringArray(r.flags);
     if (!flags.length) continue;
-    const hitFlags: string[] = r.result ? (JSON.parse(r.result.flagsHit || "[]") as string[]) : [];
+    const hitFlags = r.result ? parseStringArray(r.result.flagsHit) : [];
     for (const f of flags) {
       flagRows.push({ flag: f, raceNumber: r.raceNumber, hit: !!r.result && hitFlags.includes(f) });
     }
@@ -195,9 +210,15 @@ export default function Results() {
       <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_320px]">
         {/* Per-race entry */}
         <div className="space-y-2.5">
-          {card.races.map((r) => (
-            <ResultEntry key={r.id} race={r} autoRecap={!!settings?.autoRecapEnabled} />
-          ))}
+          {races.length === 0 ? (
+            <div className="rounded-lg border border-gold/10 bg-navy-card p-6 text-center text-sm text-muted-brand">
+              No races on this card yet.
+            </div>
+          ) : (
+            races.map((r) => (
+              <ResultEntry key={r.id} race={r} autoRecap={!!settings?.autoRecapEnabled} />
+            ))
+          )}
         </div>
 
         {/* Flag accuracy panel */}
@@ -221,7 +242,7 @@ export default function Results() {
 
           <div className="rounded-lg border border-gold/15 bg-navy-section p-4" data-testid="panel-all-time">
             <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-2">All-Time</div>
-            {!lifetime ? (
+            {!lifetime?.totals ? (
               <>
                 <div className="text-sm text-silver tabular-nums">—</div>
                 <div className="mt-1 text-xs text-muted-brand tabular-nums">Win — · ITM —</div>
@@ -237,11 +258,11 @@ export default function Results() {
 
                 <div className="mt-3 border-t border-gold/10 pt-3">
                   <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-2">By Track</div>
-                  {lifetime.byTrack.length === 0 ? (
+                  {(lifetime.byTrack ?? []).length === 0 ? (
                     <div className="text-xs text-muted-brand">No cards loaded yet.</div>
                   ) : (
                     <div className="space-y-1.5">
-                      {lifetime.byTrack.map((t) => (
+                      {(lifetime.byTrack ?? []).map((t) => (
                         <div key={t.track} className="flex items-center gap-2 text-xs tabular-nums" data-testid={`all-time-track-${t.track}`}>
                           <span className="flex-1 text-slate-brand truncate">{t.track}</span>
                           <span className="text-muted-brand">{t.races} races · {t.graded}/{t.races} graded · {pctVal(t.win)} · {pctVal(t.itm)}</span>
