@@ -12,8 +12,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Mic, Save, Check, X } from "lucide-react";
-import type { TuningProposal } from "@shared/schema";
+import { Mic, Save, Check, X, Unlock } from "lucide-react";
+import type { TuningProposal, Card } from "@shared/schema";
 
 const PREMADE_VOICES = [
   { id: "onwK4e9ZLuTAKqWW03F9", name: "Daniel", desc: "Steady Broadcaster (British)" },
@@ -126,6 +126,55 @@ function TuningInbox() {
           </div>
         ))}
       </div>
+    </Section>
+  );
+}
+
+function CompletedCardsSection() {
+  const { toast } = useToast();
+  const { data: cardList } = useQuery<Card[]>({ queryKey: ["/api/cards?includeArchived=true"] });
+  const completed = (cardList ?? [])
+    .filter((c) => c.status === "completed")
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  const unlock = useMutation({
+    mutationFn: async (id: number) => apiRequest("POST", `/api/cards/${id}/unlock`, {}),
+    onSuccess: async (_d, id) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/cards?includeArchived=true"] }),
+        queryClient.invalidateQueries({ queryKey: [`/api/cards/${id}`] }),
+      ]);
+      toast({ title: "Card unlocked", description: "Results are editable again." });
+    },
+    onError: (e) => toast({ title: "Unlock failed", description: (e as Error).message, variant: "destructive" }),
+  });
+
+  return (
+    <Section title="Completed Cards" desc="Locked cards are read-only. Unlock to re-grade or fix payouts.">
+      {completed.length === 0 ? (
+        <div className="text-xs text-muted-brand">No completed cards.</div>
+      ) : (
+        <div className="space-y-2">
+          {completed.map((c) => (
+            <div key={c.id} className="flex items-center gap-3 rounded-md border border-gold/15 bg-navy-section p-3" data-testid={`completed-card-${c.id}`}>
+              <span className="text-sm text-silver font-display font-bold flex-1 truncate">{c.track} — {c.date}</span>
+              {c.completedAt && (
+                <span className="text-[10px] text-muted-brand tabular-nums">locked {new Date(c.completedAt).toLocaleDateString()}</span>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => unlock.mutate(c.id)}
+                disabled={unlock.isPending}
+                className="border-gold/30 text-gold hover:bg-gold/10"
+                data-testid={`button-unlock-${c.id}`}
+              >
+                <Unlock className="h-3.5 w-3.5 mr-1" /> Unlock
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
     </Section>
   );
 }
@@ -349,6 +398,9 @@ export default function Settings() {
 
         {/* Auto-tuner proposals */}
         <TuningInbox />
+
+        {/* PR #41: completed-card unlock */}
+        <CompletedCardsSection />
 
         {/* Wager amounts per tier */}
         <Section title="Wager Amounts by Tier">

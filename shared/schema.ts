@@ -11,8 +11,12 @@ export const cards = sqliteTable("cards", {
   cardConviction: text("card_conviction"), // HIGH / MEDIUM / LOW
   notes: text("notes"),
   locked: integer("locked", { mode: "boolean" }).notNull().default(false),
-  status: text("status", { enum: ["active", "archived"] }).notNull().default("active"),
+  status: text("status", { enum: ["active", "archived", "completed"] }).notNull().default("active"),
   archivedAt: text("archived_at"), // ISO timestamp, set when auto-archived
+  // PR #41: lock-out timestamp. Set when "Mark Card Complete" flips status to
+  // "completed" — grading/payouts go read-only and a card_summaries row is
+  // frozen. Cleared (status→active) when unlocked via Settings.
+  completedAt: text("completed_at"),
   // Bet-structure version (PR #40). 1 = legacy flat $13.40 spread (historical
   // cards, e.g. Card #4 FL 2026-06-01); 2 = BudgetedBetBuilder ($1k tier-weighted
   // allocator). New cards are created as 2 so only NEW cards get the budgeted
@@ -58,6 +62,14 @@ export const races = sqliteTable("races", {
   // note like "EDGE→RECON: BOUNCE RISK on #1 (place pick)" when a flag on the
   // win/place pick dropped the tier; null when no demotion occurred.
   tierDemotedBy: text("tier_demoted_by"),
+
+  // PR #41: manually-scratched program numbers for this race, as a JSON string
+  // array (e.g. ["3","7"]). There is no horses table — picks are flattened pgm
+  // columns — so the race row is the authoritative per-race scratch set. Used by
+  // reTier() to exclude horses from the re-ranked pick order and exotic boxes;
+  // works on every card type (predictions-backed or manual-ingest). Toggled by
+  // the per-pick Scratch button; un-scratch removes the pgm from the array.
+  scratchedPgms: text("scratched_pgms").notNull().default("[]"),
 });
 
 // ── One row per race result the user logs ─────────────────────────────────
@@ -111,10 +123,63 @@ export const betLegs = sqliteTable("bet_legs", {
   payout: real("payout"), // null until payouts entered
   hit: integer("hit", { mode: "boolean" }), // null until graded+payouts entered
   flagsJson: text("flags_json").notNull().default("[]"),
+  // PR #41: when a scratch re-tiers a race, the OLD picks' legs are refunded
+  // rather than deleted (audit trail). A refunded leg's cost is subtracted from
+  // the ROI denominator — it never counts as a loss. New legs for the new picks
+  // are written fresh with refunded=false.
+  refunded: integer("refunded", { mode: "boolean" }).notNull().default(false),
+  scratchedAt: text("scratched_at"), // ISO timestamp, set when the leg was refunded
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
 export type BetLegRow = typeof betLegs.$inferSelect;
+
+// ── Race events (PR #41) ──────────────────────────────────────────────────
+// Append-only audit log of in-race operational events. Currently SCRATCH:
+// payload carries the scratched horse, the re-tier timestamp, and the old/new
+// pick sets so a scratch can be explained (and the Re-tier history panel
+// rendered) without recomputing. Never deleted.
+export const raceEvents = sqliteTable("race_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  raceId: integer("race_id")
+    .notNull()
+    .references(() => races.id, { onDelete: "cascade" }),
+  type: text("type").notNull(), // SCRATCH | UNSCRATCH
+  payloadJson: text("payload_json").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type RaceEventRow = typeof raceEvents.$inferSelect;
+
+// ── Card summaries (PR #41) ───────────────────────────────────────────────
+// Frozen per-card analytics roll-up, written when the card is marked complete.
+// Caches the final ROI/win-rate/ITM-rate + per-tier breakdown so completed
+// cards render their numbers instantly without re-aggregating the ledger.
+// card_id is the PK (one summary per card); recomputed if a card is unlocked,
+// edited, and re-completed.
+export const cardSummaries = sqliteTable("card_summaries", {
+  cardId: integer("card_id")
+    .primaryKey()
+    .references(() => cards.id, { onDelete: "cascade" }),
+  totalCost: real("total_cost").notNull().default(0),
+  totalPayout: real("total_payout").notNull().default(0),
+  roiPct: real("roi_pct"), // null when totalCost === 0
+  winRate: real("win_rate"), // % of graded races where WIN pick hit
+  itmRate: real("itm_rate"), // % of graded pick slots that finished ITM
+  tierBreakdownJson: text("tier_breakdown_json").notNull().default("{}"),
+  computedAt: text("computed_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type CardSummaryRow = typeof cardSummaries.$inferSelect;
+
+// Per-tier slice inside cardSummaries.tierBreakdownJson.
+export interface CardSummaryTier {
+  tier: string;
+  cost: number;
+  payout: number;
+  roi: number | null;
+  legs: number;
+}
 
 // ── Weather per race (PR #18) ─────────────────────────────────────────────
 // One row per race_id, persisted for backtesting. surfaceImpact is the derived
@@ -571,6 +636,8 @@ export type RaceWithResult = Race & {
   weather?: RaceWeather | null;
   // Pedigree summary per program number, for the race-card chip. Keyed by pgm.
   pedigree?: Record<string, PedigreeSummary>;
+  // Re-tier history (PR #41): SCRATCH events for this race, newest first.
+  events?: RaceEventRow[];
 };
 export type CardWithRaces = Card & { races: RaceWithResult[] };
 

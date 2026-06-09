@@ -465,7 +465,12 @@ export function buildLedgerRoi(opts: AnalyticsScope = {}): LedgerRoi {
     storage.getCardWithRaces(c.id);
     cardIds.add(c.id);
   }
-  const legs = storage.getAllBetLegs().filter((l) => cardIds.has(l.cardId));
+  // PR #41: exclude refunded legs (scratched-out old picks). A refunded leg's
+  // cost is removed from the ROI denominator entirely — it must never count as a
+  // loss — so it is dropped before any bucketing.
+  const legs = storage
+    .getAllBetLegs()
+    .filter((l) => cardIds.has(l.cardId) && !l.refunded);
 
   const byTier = ROI_TIERS.map((t) => roiRow(t, legs.filter((l) => l.tier === t)));
   const byPosition = LEG_POSITIONS.map((p) => roiRow(p, legs.filter((l) => l.legType === p)));

@@ -14,8 +14,20 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Volume2, Mic, Check, X, ChevronDown, DollarSign } from "lucide-react";
+import type { CardSummaryRow, CardSummaryTier } from "@shared/schema";
+import { Volume2, Mic, Check, X, ChevronDown, DollarSign, Lock, Unlock } from "lucide-react";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -276,6 +288,126 @@ function ResultEntry({ race, autoRecap }: { race: RaceWithResult; autoRecap: boo
   );
 }
 
+function MarkCompleteControl({ card }: { card: CardWithRaces }) {
+  const { toast } = useToast();
+  const completed = card.status === "completed";
+
+  const invalidate = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: [`/api/cards/${card.id}`] }),
+      queryClient.invalidateQueries({ queryKey: [`/api/cards/${card.id}/summary`] }),
+      queryClient.invalidateQueries({ queryKey: ["/api/cards?includeArchived=true"] }),
+      queryClient.invalidateQueries({ queryKey: ["/api/stats/lifetime"] }),
+    ]);
+
+  const complete = useMutation({
+    mutationFn: async () => apiRequest("POST", `/api/cards/${card.id}/complete`, {}),
+    onSuccess: async () => {
+      await invalidate();
+      toast({ title: "Card locked", description: "ROI frozen to lifetime." });
+    },
+    onError: (e: any) => toast({ title: "Couldn't lock card", description: e.message, variant: "destructive" }),
+  });
+
+  const unlock = useMutation({
+    mutationFn: async () => apiRequest("POST", `/api/cards/${card.id}/unlock`, {}),
+    onSuccess: async () => {
+      await invalidate();
+      toast({ title: "Card unlocked", description: "Results are editable again." });
+    },
+    onError: (e: any) => toast({ title: "Couldn't unlock card", description: e.message, variant: "destructive" }),
+  });
+
+  if (completed) {
+    return (
+      <Button
+        onClick={() => unlock.mutate()}
+        disabled={unlock.isPending}
+        variant="outline"
+        className="border-gold/30 text-gold hover:bg-gold/10 font-display font-bold"
+        data-testid="button-unlock-card"
+      >
+        <Unlock className="h-4 w-4 mr-1.5" /> UNLOCK CARD
+      </Button>
+    );
+  }
+
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button
+          variant="outline"
+          className="border-gold/30 text-silver hover:bg-gold/10 font-display font-bold"
+          data-testid="button-mark-complete"
+        >
+          <Lock className="h-4 w-4 mr-1.5" /> MARK COMPLETE
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent className="bg-navy-card border-gold/20">
+        <AlertDialogHeader>
+          <AlertDialogTitle className="text-silver">Lock card?</AlertDialogTitle>
+          <AlertDialogDescription className="text-muted-brand">
+            You won't be able to edit results or payouts after. The card stays viewable, and its
+            ROI is frozen into your lifetime record. You can unlock it later from Settings or here.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="border-gold/15 text-silver" data-testid="button-cancel-complete">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => complete.mutate()}
+            className="bg-gold hover:bg-gold-light text-navy-bg"
+            data-testid="button-confirm-complete"
+          >
+            Lock card
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function CompletedSummary({ cardId }: { cardId: number }) {
+  const { data: summary } = useQuery<CardSummaryRow>({
+    queryKey: [`/api/cards/${cardId}/summary`],
+  });
+  if (!summary) return null;
+  let tiers: CardSummaryTier[] = [];
+  try {
+    const j = JSON.parse(summary.tierBreakdownJson || "[]");
+    if (Array.isArray(j)) tiers = j as CardSummaryTier[];
+  } catch {
+    tiers = [];
+  }
+  const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  const roi = summary.roiPct;
+  return (
+    <div className="mt-4 rounded-lg border border-gold/25 bg-navy-section p-4" data-testid="completed-summary">
+      <div className="flex items-center gap-2 mb-3">
+        <Lock className="h-3.5 w-3.5 text-gold" />
+        <span className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold">Card Complete · Frozen ROI</span>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+        <StatChip label="ROI" value={roi == null ? "—" : `${roi}%`} />
+        <StatChip label="Cost" value={money(summary.totalCost)} />
+        <StatChip label="Payout" value={money(summary.totalPayout)} />
+        <StatChip label="Win Rate" value={summary.winRate == null ? "—" : `${summary.winRate}%`} />
+        <StatChip label="ITM Rate" value={summary.itmRate == null ? "—" : `${summary.itmRate}%`} />
+      </div>
+      {tiers.length > 0 && (
+        <div className="mt-3 border-t border-gold/10 pt-3 space-y-1.5">
+          {tiers.map((t) => (
+            <div key={t.tier} className="flex items-center gap-2 text-xs tabular-nums" data-testid={`completed-tier-${t.tier}`}>
+              <span className="w-16 text-slate-brand">{t.tier}</span>
+              <span className="text-muted-brand flex-1">{t.legs} leg{t.legs === 1 ? "" : "s"} · {money(t.cost)} → {money(t.payout)}</span>
+              <span className={t.roi != null && t.roi >= 0 ? "text-win" : "text-loss"}>{t.roi == null ? "—" : `${t.roi}%`}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Results() {
   const { data: settings } = useQuery<Settings>({ queryKey: ["/api/settings"] });
   const { data: lifetime } = useQuery<LifetimeStats>({ queryKey: ["/api/stats/lifetime"] });
@@ -396,14 +528,19 @@ export default function Results() {
       )}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-xl font-display font-black text-silver" data-testid="results-title">{title}</h1>
-        <Button
-          onClick={() => jarvis.briefViaPost(`/api/jarvis/summary-card/${card.id}`, `${card.track} card summary`)}
-          className="bg-gold hover:bg-gold-light text-navy-bg font-display font-bold"
-          data-testid="button-card-summary"
-        >
-          <Mic className="h-4 w-4 mr-1.5" /> CARD SUMMARY
-        </Button>
+        <div className="flex items-center gap-2">
+          <MarkCompleteControl card={card} />
+          <Button
+            onClick={() => jarvis.briefViaPost(`/api/jarvis/summary-card/${card.id}`, `${card.track} card summary`)}
+            className="bg-gold hover:bg-gold-light text-navy-bg font-display font-bold"
+            data-testid="button-card-summary"
+          >
+            <Mic className="h-4 w-4 mr-1.5" /> CARD SUMMARY
+          </Button>
+        </div>
       </div>
+
+      {card.status === "completed" && <CompletedSummary cardId={card.id} />}
 
       {/* Running stats */}
       <div className="mt-4 grid grid-cols-4 sm:grid-cols-8 gap-2">

@@ -188,6 +188,10 @@ export async function registerRoutes(
     }
     const race = storage.getRace(raceId);
     if (!race) return res.status(404).json({ error: "Race not found" });
+    const lockedCard = storage.getCard(race.cardId);
+    if (lockedCard?.status === "completed") {
+      return res.status(409).json({ error: "Card is completed (read-only). Unlock it in Settings to edit results." });
+    }
     try {
       const { finishOrder, ...payouts } = parsed.data;
       // Strip undefined so logResult's ?? null fallbacks apply cleanly.
@@ -210,6 +214,13 @@ export async function registerRoutes(
     const parsed = payoutsSubmitSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.flatten() });
+    }
+    const payoutRace = storage.getRace(raceId);
+    if (payoutRace) {
+      const lockedCard = storage.getCard(payoutRace.cardId);
+      if (lockedCard?.status === "completed") {
+        return res.status(409).json({ error: "Card is completed (read-only). Unlock it in Settings to edit payouts." });
+      }
     }
     const opts: Partial<Result> = {};
     for (const [k, v] of Object.entries(parsed.data)) {
@@ -297,6 +308,83 @@ export async function registerRoutes(
     const updated = storage.updateCard(id, { locked: true });
     if (!updated) return res.status(404).json({ error: "Card not found" });
     res.json(updated);
+  });
+
+  // ── PR #41: Late scratch + re-tier ────────────────────────────────────────
+  // Mark a horse (by program number) scratched/un-scratched on a race. The
+  // storage layer re-tiers the survivors, rebuilds this race's bet ledger, and
+  // records a SCRATCH race_event. Returns the refreshed card so the client can
+  // re-render picks + exotics in one round-trip.
+  app.post("/api/races/:id/scratch", (req, res) => {
+    const raceId = Number(req.params.id);
+    const pgm = typeof req.body?.pgm === "string" ? req.body.pgm.trim() : "";
+    const scratched = req.body?.scratched !== false; // default true
+    if (!pgm) return res.status(400).json({ error: "pgm (program number) is required" });
+    const race = storage.getRace(raceId);
+    if (!race) return res.status(404).json({ error: "Race not found" });
+    const lockedCard = storage.getCard(race.cardId);
+    if (lockedCard?.status === "completed") {
+      return res.status(409).json({ error: "Card is completed (read-only). Unlock it in Settings to edit." });
+    }
+    try {
+      storage.setHorseScratched(raceId, pgm, scratched);
+      res.json(storage.getCardWithRaces(race.cardId));
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
+  // Force a re-tier pass on a race without changing scratch state (idempotent;
+  // useful after manual pick edits). Returns the refreshed card.
+  app.post("/api/races/:id/retier", (req, res) => {
+    const raceId = Number(req.params.id);
+    const race = storage.getRace(raceId);
+    if (!race) return res.status(404).json({ error: "Race not found" });
+    const lockedCard = storage.getCard(race.cardId);
+    if (lockedCard?.status === "completed") {
+      return res.status(409).json({ error: "Card is completed (read-only). Unlock it in Settings to edit." });
+    }
+    try {
+      storage.reTier(raceId);
+      res.json(storage.getCardWithRaces(race.cardId));
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
+  // ── PR #41: Mark Card Complete (freeze ROI to lifetime) ───────────────────
+  // Lock the card read-only and roll up its card_summary. Returns { card, summary }.
+  app.post("/api/cards/:id/complete", (req, res) => {
+    const id = Number(req.params.id);
+    if (!storage.getCard(id)) return res.status(404).json({ error: "Card not found" });
+    try {
+      const summary = storage.completeCard(id);
+      const card = storage.getCard(id);
+      res.json({ card, summary });
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
+  // Frozen card summary (written at completion). 404 if the card was never
+  // completed; the client falls back to live running stats in that case.
+  app.get("/api/cards/:id/summary", (req, res) => {
+    const id = Number(req.params.id);
+    const summary = storage.getCardSummary(id);
+    if (!summary) return res.status(404).json({ error: "No summary for this card" });
+    res.json(summary);
+  });
+
+  // Unlock a completed card so results/payouts can be edited again.
+  app.post("/api/cards/:id/unlock", (req, res) => {
+    const id = Number(req.params.id);
+    if (!storage.getCard(id)) return res.status(404).json({ error: "Card not found" });
+    try {
+      const card = storage.unlockCard(id);
+      res.json(card);
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
   });
 
   // ── PR #25: Deep post-mortem ("answer key") ───────────────────────────────
