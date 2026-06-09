@@ -1,5 +1,6 @@
 import { storage } from "./storage";
 import type { CardWithRaces, RaceWithResult, Settings } from "@shared/schema";
+import { getCardLedger } from "./services/bankroll";
 
 function wagerForTier(tier: string, s: Settings): { stake: number; payoutMult: (winPayout: number | null) => number } {
   // stake = win-side stake; returns gross return if win pick won.
@@ -63,7 +64,9 @@ export function buildAnalyticsSummary(opts: AnalyticsScope = {}) {
   const graded = allRaces.filter((r) => r.result);
 
   // Tier hit rates
-  const tiers = ["SNIPER", "EDGE", "RECON", "PASS"];
+  // PR #46: include DUAL — the v2 strip was missing it, so the chart
+  // under-reported DUAL volume + hide its actual hit rate.
+  const tiers = ["SNIPER", "EDGE", "DUAL", "RECON", "PASS"];
   const tierHitRates = tiers.map((tier) => {
     const rs = graded.filter((r) => r.tier === tier);
     const n = rs.length || 1;
@@ -80,11 +83,32 @@ export function buildAnalyticsSummary(opts: AnalyticsScope = {}) {
     };
   });
 
-  // Bankroll curve — cumulative net by race (graded, in race order across cards)
-  let cumulative = 0;
+  // Bankroll curve — PR #46: rebuilt from bankroll_events.runningBalance so the
+  // curve matches the headline bankroll pill exactly. The legacy wagerForTier
+  // reconstruction below is kept (commented intent) for reference: it routinely
+  // disagreed with the ledger because it never modeled exotics. We now plot the
+  // realized running balance ledger, race-by-race, then SUBTRACT each card's
+  // $1k starting bankroll so the chart is a P/L curve (starts at 0).
   const bankrollCurve: { label: string; cumulative: number }[] = [{ label: "Start", cumulative: 0 }];
   let totalStaked = 0;
   let totalReturn = 0;
+  for (const c of fullCards) {
+    const ledger = getCardLedger(c.id);
+    // First ledger event for each card is the +$1000 card-start seed; subtract
+    // it so the curve plots realized P/L, not absolute bankroll.
+    const seed = ledger.find((e) => e.source === "card_start");
+    const startBalance = seed?.runningBalance ?? 1000;
+    for (const e of ledger) {
+      if (e.source === "card_start") continue;
+      const cumulative = Math.round((e.runningBalance - startBalance) * 100) / 100;
+      const raceNum = e.raceId
+        ? c.races.find((r: RaceWithResult) => r.id === e.raceId)?.raceNumber
+        : undefined;
+      const label = raceNum ? `C${c.id}R${raceNum}` : `C${c.id}`;
+      bankrollCurve.push({ label, cumulative });
+    }
+  }
+  // wagerForTier staked/return tally retained for downstream UIs that read it.
   for (const r of graded) {
     const { stake, payoutMult } = wagerForTier(r.tier, settings);
     totalStaked += stake;
@@ -95,15 +119,14 @@ export function buildAnalyticsSummary(opts: AnalyticsScope = {}) {
       ret += r.result.placePayout ? (placeStake / 2) * r.result.placePayout : placeStake * 1.4;
     }
     totalReturn += ret;
-    cumulative += ret - stake;
-    bankrollCurve.push({ label: `R${r.raceNumber}`, cumulative: Math.round(cumulative) });
   }
   // PR #45: the headline ROI now reads from the bet_legs ledger (same source as
   // the bankroll pill and the Strategy ROI table) rather than the legacy
   // wagerForTier reconstruction, which over/under-stated dollars (Card #9 showed
   // +39.7% here while the bankroll ledger read +96%). Two sources of truth →
   // one. The wagerForTier path is retained only for the relative bankroll curve.
-  const ledgerOverall = buildLedgerRoi(opts).overall;
+  const ledgerRoiSummary = buildLedgerRoi(opts);
+  const ledgerOverall = ledgerRoiSummary.overall;
   const roi = ledgerOverall.roi ?? 0;
 
   // Flag accuracy
@@ -146,7 +169,17 @@ export function buildAnalyticsSummary(opts: AnalyticsScope = {}) {
   const avgWinPct = graded.length ? Math.round((winN / graded.length) * 100) : 0;
   const itmN = graded.filter((r) => (r.result?.itmCount ?? 0) > 0).length;
   const avgItmPct = graded.length ? Math.round((itmN / graded.length) * 100) : 0;
-  const bestTier =
+  // PR #46: best tier picker now uses realized ROI from the bet_legs ledger,
+  // not just hit rate. A 100% hit rate on $2 RECON WIN bets is not a better
+  // strategy than 60% on $80 SNIPER straight exactas — dollars matter.
+  const tierByRoi = ledgerRoiSummary.byTier ?? [];
+  const bestTierRow = tierByRoi
+    .filter((t) => t.cost > 0 && t.roi != null)
+    .reduce<{ key: string; roi: number | null }>(
+      (best, t) => ((t.roi ?? -Infinity) > (best.roi ?? -Infinity) ? t : best),
+      { key: "—", roi: null },
+    );
+  const bestTier = bestTierRow.key !== "—" ? bestTierRow.key :
     tierHitRates.reduce((best, t) => (t.win > best.win ? t : best), { tier: "—", win: -1 }).tier;
 
   return {

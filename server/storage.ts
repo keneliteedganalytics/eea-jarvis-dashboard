@@ -74,6 +74,7 @@ import {
   configFromSettings,
   type RaceBets as BudgetedRaceBets,
 } from "./services/budgeted-bets";
+import { buildV3Bets, type V3RaceBets, type V3BetLeg } from "./services/budgeted-bets-v3";
 import { getBloodstockForCard } from "./services/brisnet-ingest";
 import {
   seedCardBankroll,
@@ -263,8 +264,16 @@ export class DatabaseStorage implements IStorage {
     // PR #40: NEW cards (betBudgetVersion >= 2) use the tier-weighted $1k
     // BudgetedBetBuilder, computed across the whole card. Historical cards
     // (version 1, e.g. Card #4) keep their legacy flat bets AS-IS.
-    const useBudgeted = (card.betBudgetVersion ?? 1) >= 2;
-    const budgetedByRace: Map<number, BudgetedRaceBets> | null = useBudgeted
+    // PR #46: v3 cards (betBudgetVersion === 3) use the exacta-led builder.
+    const version = card.betBudgetVersion ?? 1;
+    const useV3 = version >= 3;
+    const useBudgeted = version >= 2;
+    const v3ByRace: Map<number, V3RaceBets> | null = useV3
+      ? buildV3Bets(raceRows)
+      : null;
+    const budgetedByRace: Map<number, BudgetedRaceBets> | null = useV3
+      ? null
+      : useBudgeted
       ? buildBudgetedBets(
           raceRows.map((r) => ({ ...r, fieldSize: this.fieldSizeForRace(r.id) })),
           configFromSettings(s),
@@ -276,7 +285,9 @@ export class DatabaseStorage implements IStorage {
     // DRM-ingested, in which case the chip falls back to confidence "none".
     const pedigreeNames = getBloodstockForCard(card.date, card.track);
     const withResults: RaceWithResult[] = raceRows.map((r) => {
-      const bets = budgetedByRace
+      const bets = v3ByRace
+        ? v3ByRace.get(r.id) ?? { tier: r.tier as any, raceAllocation: 0, pass: true, legs: [], budgetVersion: 3 as const }
+        : budgetedByRace
         ? budgetedByRace.get(r.id) ?? { tier: r.tier as any, raceAllocation: 0, pass: true, legs: [] }
         : buildWagers(r, { bankroll: s.bankroll, dailyRiskCapPct: s.dailyRiskCapPct }, racesOnCard);
       return {
@@ -313,6 +324,9 @@ export class DatabaseStorage implements IStorage {
       if (existing.length > 0) continue;
       const flagsJson = r.flags || "[]";
       for (const leg of legs) {
+        // PR #46: persist combo + betSubtype when present (v3 multi-leg bets).
+        // Older v1/v2 legs simply leave these null.
+        const v3 = leg as Partial<V3BetLeg>;
         db.insert(betLegs)
           .values({
             raceId: r.id,
@@ -324,6 +338,8 @@ export class DatabaseStorage implements IStorage {
             payout: null,
             hit: null,
             flagsJson,
+            combo: v3.combo ? JSON.stringify(v3.combo) : null,
+            betSubtype: v3.betSubtype ?? null,
           })
           .run();
       }
@@ -756,6 +772,93 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(betLegs.raceId, raceId), eq(betLegs.refunded, false)))
       .all();
     if (legs.length === 0) return;
+
+    // PR #46: parse finishOrder so v3 combo-aware legs can be graded correctly.
+    // A $5 EXACTA A/B/C box still cashes when ANY two of {A,B,C} finish 1-2 in
+    // either order — the flat result.exactaHit doesn't capture that.
+    let finishOrder: string[] = [];
+    try {
+      const parsed = JSON.parse(result.finishOrder || "[]");
+      if (Array.isArray(parsed)) finishOrder = parsed.map(String);
+    } catch {
+      finishOrder = [];
+    }
+    const first = finishOrder[0];
+    const second = finishOrder[1];
+    const third = finishOrder[2];
+
+    // v3 combo grader. Returns null if the leg lacks combo+betSubtype (older
+    // v1/v2 leg) so the caller falls back to flat per-tier grading below.
+    const v3Grade = (
+      leg: { legType: string; betSubtype: string | null; combo: string | null; cost: number },
+    ): { hit: boolean; payout: number | null } | null => {
+      if (!leg.combo || !leg.betSubtype) return null;
+      let combo: string[] = [];
+      try {
+        const j = JSON.parse(leg.combo);
+        if (Array.isArray(j)) combo = j.map(String);
+      } catch {
+        return null;
+      }
+      if (combo.length === 0 || !first) return { hit: false, payout: 0 };
+
+      if (leg.legType === "EXACTA" && second) {
+        const top2 = [first, second];
+        let isHit = false;
+        if (leg.betSubtype === "STRAIGHT") {
+          isHit = combo[0] === first && combo[1] === second;
+        } else if (leg.betSubtype === "BOX") {
+          isHit = top2.every((p) => combo.includes(p));
+        } else if (leg.betSubtype === "KEY") {
+          const key = combo[0];
+          const others = combo.slice(1);
+          if (key === first) isHit = others.includes(second);
+          else if (key === second) isHit = others.includes(first);
+        }
+        if (isHit) {
+          const exa = result.exactaPayout;
+          let nCombos = 1;
+          if (leg.betSubtype === "BOX") nCombos = combo.length * (combo.length - 1);
+          else if (leg.betSubtype === "KEY") nCombos = (combo.length - 1) * 2;
+          const perCombo = leg.cost / Math.max(nCombos, 1);
+          const payout = exa != null ? Math.round((perCombo / 2) * exa * 100) / 100 : null;
+          return { hit: true, payout };
+        }
+        return { hit: false, payout: 0 };
+      }
+
+      if (leg.legType === "TRIFECTA" && second && third) {
+        const top3 = [first, second, third];
+        let isHit = false;
+        if (leg.betSubtype === "STRAIGHT") {
+          isHit = combo[0] === first && combo[1] === second && combo[2] === third;
+        } else if (leg.betSubtype === "BOX") {
+          isHit = top3.every((p) => combo.includes(p));
+        } else if (leg.betSubtype === "KEY") {
+          const key = combo[0];
+          const others = combo.slice(1);
+          isHit = key === first && others.includes(second) && others.includes(third);
+        }
+        if (isHit) {
+          const tri = result.trifectaPayout;
+          let nCombos = 1;
+          if (leg.betSubtype === "BOX") {
+            nCombos = combo.length * (combo.length - 1) * (combo.length - 2);
+          } else if (leg.betSubtype === "KEY") {
+            const k = combo.length - 1;
+            nCombos = k * (k - 1);
+          }
+          const perCombo = leg.cost / Math.max(nCombos, 1);
+          // Tri base is typically $0.50.
+          const payout = tri != null ? Math.round((perCombo / 0.5) * tri * 100) / 100 : null;
+          return { hit: true, payout };
+        }
+        return { hit: false, payout: 0 };
+      }
+
+      return null;
+    };
+
     const hitForLeg = (legType: string): boolean | null => {
       switch (legType) {
         case "WIN": return result.winHit ?? null;
@@ -779,6 +882,21 @@ export class DatabaseStorage implements IStorage {
       }
     };
     for (const leg of legs) {
+      // PR #46: try the v3 combo grader first; fall back to the flat per-tier
+      // grader when this leg pre-dates v3 (no combo/bet_subtype).
+      const v3Result = v3Grade({
+        legType: leg.legType,
+        betSubtype: (leg as { betSubtype?: string | null }).betSubtype ?? null,
+        combo: (leg as { combo?: string | null }).combo ?? null,
+        cost: leg.cost,
+      });
+      if (v3Result) {
+        db.update(betLegs)
+          .set({ hit: v3Result.hit, payout: v3Result.payout })
+          .where(eq(betLegs.id, leg.id))
+          .run();
+        continue;
+      }
       const hit = hitForLeg(leg.legType);
       let payout: number | null = null;
       if (hit === true) {
@@ -946,8 +1064,11 @@ export class DatabaseStorage implements IStorage {
     const race = this.getRace(raceId);
     if (!race) return;
     const s = this.getSettings();
-    let bets: BudgetedRaceBets | undefined;
-    if ((betBudgetVersion ?? 1) >= 2) {
+    let bets: BudgetedRaceBets | V3RaceBets | undefined;
+    const version = betBudgetVersion ?? 1;
+    if (version >= 3) {
+      bets = buildV3Bets([race]).get(raceId);
+    } else if (version >= 2) {
       bets = buildBudgetedBets(
         [{ ...race, fieldSize: this.fieldSizeForRace(raceId) }],
         configFromSettings(s),
@@ -963,6 +1084,7 @@ export class DatabaseStorage implements IStorage {
     const legs = bets?.legs ?? [];
     const flagsJson = race.flags || "[]";
     for (const leg of legs) {
+      const v3 = leg as Partial<V3BetLeg>;
       db.insert(betLegs)
         .values({
           raceId,
@@ -975,6 +1097,8 @@ export class DatabaseStorage implements IStorage {
           hit: null,
           flagsJson,
           refunded: false,
+          combo: v3.combo ? JSON.stringify(v3.combo) : null,
+          betSubtype: v3.betSubtype ?? null,
         })
         .run();
     }

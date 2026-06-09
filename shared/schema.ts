@@ -21,7 +21,10 @@ export const cards = sqliteTable("cards", {
   // cards, e.g. Card #4 FL 2026-06-01); 2 = BudgetedBetBuilder ($1k tier-weighted
   // allocator). New cards are created as 2 so only NEW cards get the budgeted
   // allocator; past cards keep their bets AS-IS for historical accuracy.
-  betBudgetVersion: integer("bet_budget_version").notNull().default(2),
+  // PR #46 — forward-only flip to v3 (exacta-led multi-leg). Existing cards
+  // were created with version 2 (or 1 for pre-PR-40 historicals) and keep
+  // their bets AS-IS; only new cards opt into v3.
+  betBudgetVersion: integer("bet_budget_version").notNull().default(3),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -129,6 +132,11 @@ export const betLegs = sqliteTable("bet_legs", {
   // are written fresh with refunded=false.
   refunded: integer("refunded", { mode: "boolean" }).notNull().default(false),
   scratchedAt: text("scratched_at"), // ISO timestamp, set when the leg was refunded
+  // PR #46 — multi-leg exacta-led betting. combo is a JSON array of pgm
+  // strings (ordered for STRAIGHT/KEY, set-equality for BOX). betSubtype
+  // distinguishes EXACTA legs: STRAIGHT, BOX, KEY. Null for WPS legs.
+  combo: text("combo"), // JSON array of pgm strings, e.g. '["5","1"]'
+  betSubtype: text("bet_subtype"), // STRAIGHT | BOX | KEY | null
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
