@@ -23,6 +23,7 @@ import {
   buildLifetimeStats,
   buildTrackRecordSummary,
   buildLedgerRoi,
+  buildPr42Analytics,
   TIMEFRAMES,
   type Timeframe,
 } from "./analytics";
@@ -366,6 +367,22 @@ export async function registerRoutes(
     }
   });
 
+  // PR #42 — re-grade a card under the current model: rebuild its bet_legs
+  // ledger (picks up recalibrated tier weights + the Maiden-Claim EX-only gate
+  // for betBudgetVersion>=2 cards) and refreeze the summary with PASS-WIN MISS
+  // counts. Used to bring already-graded cards onto the v2 model.
+  app.post("/api/cards/:id/regrade", (req, res) => {
+    const id = Number(req.params.id);
+    if (!storage.getCard(id)) return res.status(404).json({ error: "Card not found" });
+    try {
+      const summary = storage.regradeCard(id);
+      const card = storage.getCard(id);
+      res.json({ card, summary });
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
   // Frozen card summary (written at completion). 404 if the card was never
   // completed; the client falls back to live running stats in that case.
   app.get("/api/cards/:id/summary", (req, res) => {
@@ -596,6 +613,18 @@ export async function registerRoutes(
     const track = typeof req.query.track === "string" ? req.query.track : undefined;
     const date = typeof req.query.date === "string" ? req.query.date : undefined;
     res.json(buildLedgerRoi({ scope, track, date }));
+  });
+
+  // PR #42 analytics tiles: tier-weight performance, flag performance
+  // (ml_favorite_matched / speed_gap / field_size gate), and PASS-WIN MISSES.
+  // Same scope contract as /api/analytics/summary.
+  app.get("/api/analytics/pr42", (req, res) => {
+    const rawScope = String(req.query.scope || "lifetime").toLowerCase();
+    const scope: "today" | "track" | "lifetime" =
+      rawScope === "today" || rawScope === "track" ? (rawScope as "today" | "track") : "lifetime";
+    const track = typeof req.query.track === "string" ? req.query.track : undefined;
+    const date = typeof req.query.date === "string" ? req.query.date : undefined;
+    res.json(buildPr42Analytics({ scope, track, date }));
   });
 
   // Distinct list of tracks with graded race counts, for the Per-Track picker.

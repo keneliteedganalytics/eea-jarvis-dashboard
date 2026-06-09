@@ -42,6 +42,8 @@ export interface RunnerScore {
   features: RunnerFeatures;
   composite: number; // 0-100 weighted blend over present features
   rank: number; // 1-based, by composite desc
+  mlOdds?: number | null; // morning-line odds (decimal-to-1), for ML-favorite match
+  speedFig?: number | null; // last-race speed figure, for speed_figure_gap rule
 }
 
 export interface FusionV3Race {
@@ -51,10 +53,33 @@ export interface FusionV3Race {
   raceFlags: string[];
 }
 
+// PR #42: a conviction adjustment applied AFTER base tiering. `delta` is the
+// signed points added to (or removed from) the pick's conviction; `reason` is a
+// stable code for analytics bucketing.
+export interface ConvictionModifier {
+  reason: string; // "ml_favorite_matched" | "speed_gap" | ...
+  delta: number;
+}
+
+// PR #42: a tier demotion forced by a post-tier override gate (e.g. speed_gap).
+export interface TierDemotion {
+  reason: string;
+  from: Tier;
+  to: Tier;
+  gap?: number;
+}
+
 export interface TierResult {
   pgm: string;
   tier: Tier;
   flags?: string[];
+  // PR #42 — conviction modifiers (e.g. ml_favorite_matched +5) applied to this
+  // pick, and any forced demotions (e.g. speed_gap → RECON). The named boolean
+  // flags below are convenience mirrors the pick JSON / analytics read directly.
+  conviction?: number; // base composite + sum(modifiers.delta), clamped 0-100
+  modifiers?: ConvictionModifier[];
+  demotions?: TierDemotion[];
+  mlFavoriteMatched?: boolean;
 }
 
 // Weighted average over PRESENT features only — nulls drop out and the weights
@@ -84,6 +109,10 @@ export function scoreRace(race: DeepRace, trackCondition?: string | null): Runne
       features,
       composite: composite(features),
       rank: 0,
+      mlOdds: r.mlOdds ?? null,
+      // Last-race speed figure off the Ultimate Race Summary; falls back to the
+      // most recent final-speed reading when the explicit last-race field is null.
+      speedFig: r.summary.speedLastRace ?? r.summary.finalSpd1 ?? null,
     };
   });
   scored.sort((a, b) => b.composite - a.composite);
@@ -199,12 +228,94 @@ export function assignTiersV3(scored: RunnerScore[]): { tiers: TierResult[]; rac
     );
   }
 
+  // ── PR #42 conviction modifiers + post-tier gates ──────────────────────────
+  // These run on the TOP pick (the highest-conviction non-PASS horse) after the
+  // A1–A5 gates have settled its tier. modifiersByPgm/demotionsByPgm are keyed
+  // so they ride along onto the per-runner TierResult below.
+  const modifiersByPgm = new Map<string, ConvictionModifier[]>();
+  const demotionsByPgm = new Map<string, TierDemotion[]>();
+  const mlMatchedByPgm = new Map<string, boolean>();
+
+  // Identify the morning-line favorite = lowest mlOdds across the field.
+  const mlFav = scored
+    .filter((s) => typeof s.mlOdds === "number" && (s.mlOdds as number) > 0)
+    .sort((a, b) => (a.mlOdds as number) - (b.mlOdds as number))[0];
+
+  // The current top pick = best non-PASS horse by tier rank then composite.
+  const topPick = [...scored].sort((a, b) => {
+    const ra = tierRankIdx(tierByPgm.get(a.pgm) ?? "PASS");
+    const rb = tierRankIdx(tierByPgm.get(b.pgm) ?? "PASS");
+    if (ra !== rb) return ra - rb;
+    return a.rank - b.rank;
+  })[0];
+
+  if (topPick && tierByPgm.get(topPick.pgm) !== "PASS") {
+    // ── #3: ml_favorite_matched (+5 conviction) ──
+    // When our top-tiered horse IS the ML favorite, the public and our model
+    // agree on the same number — a small conviction bump (caps still apply).
+    if (mlFav && mlFav.pgm === topPick.pgm) {
+      mlMatchedByPgm.set(topPick.pgm, true);
+      addTo(modifiersByPgm, topPick.pgm, { reason: "ml_favorite_matched", delta: 5 });
+      raceFlags.push(`ML_FAVORITE_MATCHED on #${topPick.pgm} (+5 conviction)`);
+      addFlag(topPick.pgm, "ML_FAVORITE_MATCHED (+5 conviction)");
+    }
+
+    // ── #4: speed_figure_gap demotion ──
+    // gap = field's top last-race speed figure − our top pick's. A SNIPER/EDGE
+    // that gives up >5 speed points to a faster horse in the field is over-tiered
+    // for the pace it actually shows → demote to RECON.
+    const speeds = scored
+      .map((s) => s.speedFig)
+      .filter((v): v is number => typeof v === "number");
+    const fieldTopSpeed = speeds.length ? Math.max(...speeds) : null;
+    const ours = topPick.speedFig;
+    if (fieldTopSpeed != null && typeof ours === "number") {
+      const gap = Math.round((fieldTopSpeed - ours) * 10) / 10;
+      const curTier = tierByPgm.get(topPick.pgm)!;
+      if (gap > 5 && (curTier === "SNIPER" || curTier === "EDGE")) {
+        tierByPgm.set(topPick.pgm, "RECON");
+        addTo(demotionsByPgm, topPick.pgm, {
+          reason: "speed_gap",
+          from: curTier,
+          to: "RECON",
+          gap,
+        });
+        raceFlags.push(
+          `SPEED_GAP_DEMOTION on #${topPick.pgm} (${curTier}→RECON: gives ${gap} speed pts to field top)`,
+        );
+        addFlag(topPick.pgm, `SPEED_GAP_DEMOTION (${curTier}→RECON, gap ${gap})`);
+      }
+    }
+  }
+
   const tiers: TierResult[] = scored.map((s) => {
     const tier = tierByPgm.get(s.pgm) ?? "PASS";
     const hf = flagsByPgm.get(s.pgm);
-    return { pgm: s.pgm, tier, ...(hf && hf.length ? { flags: hf } : {}) };
+    const mods = modifiersByPgm.get(s.pgm);
+    const demos = demotionsByPgm.get(s.pgm);
+    const matched = mlMatchedByPgm.get(s.pgm) ?? false;
+    const convDelta = (mods ?? []).reduce((a, m) => a + m.delta, 0);
+    const conviction = Math.max(0, Math.min(100, s.composite + convDelta));
+    return {
+      pgm: s.pgm,
+      tier,
+      ...(hf && hf.length ? { flags: hf } : {}),
+      ...(mods && mods.length ? { modifiers: mods, conviction } : {}),
+      ...(demos && demos.length ? { demotions: demos } : {}),
+      ...(matched ? { mlFavoriteMatched: true } : {}),
+    };
   });
   return { tiers, raceFlags };
+}
+
+function tierRankIdx(t: Tier): number {
+  return ["SNIPER", "EDGE", "DUAL", "RECON", "PASS"].indexOf(t);
+}
+
+function addTo<T>(m: Map<string, T[]>, key: string, val: T): void {
+  const arr = m.get(key) ?? [];
+  arr.push(val);
+  m.set(key, arr);
 }
 
 export function demoteOne(tier: Tier): Tier {

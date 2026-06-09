@@ -130,7 +130,9 @@ CREATE TABLE IF NOT EXISTS card_summaries (
   win_rate REAL,
   itm_rate REAL,
   tier_breakdown_json TEXT NOT NULL DEFAULT '{}',
-  computed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  computed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  pass_win_miss_count INTEGER NOT NULL DEFAULT 0,
+  pass_win_miss_horses TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -536,6 +538,24 @@ const resultsCols = new Set(
 );
 if (!resultsCols.has("win_odds")) {
   sqlite.exec("ALTER TABLE results ADD COLUMN win_odds REAL");
+}
+
+// Idempotent card_summaries-column migration for PR #42: PASS-WIN MISS tracking
+// (count + JSON detail of PASS races whose winner was on our board grid).
+const cardSummaryCols = new Set(
+  (sqlite.prepare("PRAGMA table_info(card_summaries)").all() as { name: string }[]).map(
+    (c) => c.name,
+  ),
+);
+if (!cardSummaryCols.has("pass_win_miss_count")) {
+  sqlite.exec(
+    "ALTER TABLE card_summaries ADD COLUMN pass_win_miss_count INTEGER NOT NULL DEFAULT 0",
+  );
+}
+if (!cardSummaryCols.has("pass_win_miss_horses")) {
+  sqlite.exec(
+    "ALTER TABLE card_summaries ADD COLUMN pass_win_miss_horses TEXT NOT NULL DEFAULT '[]'",
+  );
 }
 
 // Idempotent brisnet_horse_data migration for PR #16 Phase 2: persist the

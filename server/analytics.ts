@@ -518,6 +518,184 @@ export function buildLedgerRoi(opts: AnalyticsScope = {}): LedgerRoi {
   };
 }
 
+// ── PR #42 analytics tiles ────────────────────────────────────────────────
+// Three new tiles, all scope-aware via the same card filter as the other
+// analytics builders:
+//   1. Tier Weight Performance — actual ledger ROI per tier vs the THEORETICAL
+//      contribution (planned weight x hit rate), so we can see whether the
+//      recalibrated weights are paying off.
+//   2. Flag Performance — ROI when ml_favorite_matched fired, when a speed-gap
+//      demotion fired, and when the Maiden Claim 9+ EX-only gate fired.
+//   3. PASS-WIN MISSES — cards with PASS races whose winner was on our board.
+import { isMaidenClaiming, DEFAULT_TIER_WEIGHTS } from "./services/budgeted-bets";
+import type { CardSummaryRow, PassWinMissHorse } from "@shared/schema";
+
+const PR42_TIERS = ["SNIPER", "EDGE", "DUAL", "RECON"] as const;
+
+export interface TierWeightPerfRow {
+  tier: string;
+  plannedWeight: number; // from DEFAULT_TIER_WEIGHTS
+  legs: number;
+  cost: number;
+  payout: number;
+  actualRoi: number | null; // (payout - cost) / cost, %
+  winRate: number | null; // % of graded WIN-pick races at this tier
+  theoreticalContribution: number | null; // plannedWeight * winRate/100
+}
+
+export interface FlagPerfRow {
+  flag: string; // ml_favorite_matched | speed_gap | field_size_maiden_claim_9plus
+  legs: number;
+  cost: number;
+  payout: number;
+  roi: number | null;
+  hitRate: number | null;
+}
+
+export interface PassWinMissCard {
+  cardId: number;
+  track: string;
+  date: string;
+  count: number;
+  horses: PassWinMissHorse[];
+}
+
+export interface Pr42Analytics {
+  scope: string;
+  track: string | null;
+  date: string | null;
+  tierWeightPerf: TierWeightPerfRow[];
+  flagPerf: FlagPerfRow[];
+  passWinMisses: PassWinMissCard[];
+}
+
+function scopeFilter(opts: AnalyticsScope, c: { track: string; date: string }): boolean {
+  const scope = opts.scope ?? "lifetime";
+  if (scope === "today") return c.date === todayUtc();
+  if (scope === "track") {
+    if (opts.track && c.track !== opts.track) return false;
+    if (opts.date && c.date !== opts.date) return false;
+    return !!opts.track;
+  }
+  return true;
+}
+
+export function buildPr42Analytics(opts: AnalyticsScope = {}): Pr42Analytics {
+  const scope = opts.scope ?? "lifetime";
+  const cards = storage.getCards().filter((c) => scopeFilter(opts, c));
+  const fullCards: CardWithRaces[] = cards
+    .map((c) => storage.getCardWithRaces(c.id))
+    .filter((c): c is CardWithRaces => !!c);
+  const cardIds = new Set(fullCards.map((c) => c.id));
+
+  // Live (non-refunded) settled ledger legs in scope.
+  const legs = storage
+    .getAllBetLegs()
+    .filter((l) => cardIds.has(l.cardId) && !l.refunded);
+  const allRaces: RaceWithResult[] = fullCards.flatMap((c) => c.races);
+  const graded = allRaces.filter((r) => r.result);
+
+  // ── 1. Tier Weight Performance ──
+  const tierWeightPerf: TierWeightPerfRow[] = PR42_TIERS.map((tier) => {
+    const tLegs = legs.filter((l) => l.tier === tier && l.hit !== null);
+    const cost = round2(tLegs.reduce((a, l) => a + l.cost, 0));
+    const payout = round2(tLegs.reduce((a, l) => a + (l.payout ?? 0), 0));
+    const actualRoi = cost > 0 ? round1(((payout - cost) / cost) * 100) : null;
+    const tRaces = graded.filter((r) => r.tier === tier);
+    const winN = tRaces.filter((r) => r.result?.winHit).length;
+    const winRate = tRaces.length ? round1((winN / tRaces.length) * 100) : null;
+    const plannedWeight = DEFAULT_TIER_WEIGHTS[tier];
+    return {
+      tier,
+      plannedWeight,
+      legs: tLegs.length,
+      cost,
+      payout,
+      actualRoi,
+      winRate,
+      theoreticalContribution: winRate == null ? null : round1((plannedWeight * winRate) / 100),
+    };
+  });
+
+  // ── 2. Flag Performance ──
+  // ml_favorite_matched + speed_gap come off each leg's flags_json (the race's
+  // flags, which carry the conviction-modifier markers fusion-v3 emits). The
+  // field_size gate is reconstructed from each leg's race conditions + field
+  // size, since gates ride on the leg object rather than flags_json.
+  const flagMatch = (l: (typeof legs)[number], needle: RegExp): boolean => {
+    try {
+      const j = JSON.parse(l.flagsJson || "[]");
+      return Array.isArray(j) && j.some((f) => needle.test(String(f)));
+    } catch {
+      return false;
+    }
+  };
+  const raceById = new Map(allRaces.map((r) => [r.id, r]));
+  const isGateLeg = (l: (typeof legs)[number]): boolean => {
+    const r = raceById.get(l.raceId);
+    if (!r) return false;
+    return l.legType === "EXACTA" && isMaidenClaiming(r.conditions) && r.bets?.gates?.includes("field_size_maiden_claim_9plus") === true;
+  };
+  const flagPerf: FlagPerfRow[] = [
+    flagPerfRow("ml_favorite_matched", legs.filter((l) => flagMatch(l, /ML_FAVORITE_MATCHED/i))),
+    flagPerfRow("speed_gap", legs.filter((l) => flagMatch(l, /SPEED_GAP_DEMOTION/i))),
+    flagPerfRow("field_size_maiden_claim_9plus", legs.filter(isGateLeg)),
+  ];
+
+  // ── 3. PASS-WIN MISSES ──
+  const passWinMisses: PassWinMissCard[] = [];
+  for (const c of fullCards) {
+    const summary: CardSummaryRow | undefined = storage.getCardSummary(c.id);
+    if (!summary || (summary.passWinMissCount ?? 0) === 0) continue;
+    let horses: PassWinMissHorse[] = [];
+    try {
+      const j = JSON.parse(summary.passWinMissHorses || "[]");
+      if (Array.isArray(j)) horses = j as PassWinMissHorse[];
+    } catch {
+      horses = [];
+    }
+    passWinMisses.push({
+      cardId: c.id,
+      track: c.track,
+      date: c.date,
+      count: summary.passWinMissCount,
+      horses,
+    });
+  }
+  passWinMisses.sort((a, b) => b.date.localeCompare(a.date));
+
+  return {
+    scope,
+    track: opts.track ?? null,
+    date: opts.date ?? (scope === "today" ? todayUtc() : null),
+    tierWeightPerf,
+    flagPerf,
+    passWinMisses,
+  };
+}
+
+function flagPerfRow(flag: string, ls: { hit: boolean | null; cost: number; payout: number | null }[]): FlagPerfRow {
+  const settled = ls.filter((l) => l.hit !== null);
+  const cost = round2(settled.reduce((a, l) => a + l.cost, 0));
+  const payout = round2(settled.reduce((a, l) => a + (l.payout ?? 0), 0));
+  const hits = settled.filter((l) => l.hit === true).length;
+  return {
+    flag,
+    legs: settled.length,
+    cost,
+    payout,
+    roi: cost > 0 ? round1(((payout - cost) / cost) * 100) : null,
+    hitRate: settled.length ? Math.round((hits / settled.length) * 100) : null,
+  };
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 export function buildCardStats(card: CardWithRaces) {
   const graded = card.races.filter((r) => r.result);
   const winsHit = graded.filter((r) => r.result?.winHit).length;

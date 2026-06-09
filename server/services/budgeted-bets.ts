@@ -43,6 +43,7 @@ export interface BetLeg {
   structure: string;
   horses: string[];
   cost: number;
+  gates?: string[]; // PR #42: bet-type gates that shaped this leg set
 }
 
 export interface RaceBets {
@@ -51,14 +52,21 @@ export interface RaceBets {
   pass: boolean;
   legs: BetLeg[];
   demotedFrom?: Tier; // set when a chaos flag dropped the leg pattern
+  gates?: string[]; // PR #42: race-level bet-type gates that fired
 }
 
 // Defaults mirrored from the spec / settings defaults. Used when a settings JSON
 // blob is missing a tier or fails to parse.
+//
+// PR #42 recalibration (EDGE +7, DUAL -4): the Card #4/#8 postmortem (16 races)
+// showed EDGE at 67% WIN / 100% ITM but underfunded at 18, while DUAL ran
+// 25% WIN / 50% ITM yet was overfunded at 10. Net card envelope is unchanged
+// (~$1k for an 8-race card); the dollars move from DUAL into EDGE where the
+// hit rate actually is.
 export const DEFAULT_TIER_WEIGHTS: TierWeights = {
   SNIPER: 30,
-  EDGE: 18,
-  DUAL: 10,
+  EDGE: 25,
+  DUAL: 6,
   RECON: 4,
   PASS: 0,
 };
@@ -77,6 +85,40 @@ const CHAOS_FLAG_SUBSTRINGS = ["FIELD SIZE chaos", "A1_DUAL_DOWNGRADE", "VALUE G
 
 export function normalizeTier(tier: string): Tier {
   return (TIER_ORDER as string[]).includes(tier) ? (tier as Tier) : "PASS";
+}
+
+// PR #42 — Maiden Claiming chaos gate. A Maiden Claiming race with a full field
+// (9+) is high-variance and low-predictability: TRI/SUPER hit rates crater while
+// EX still captures the top two. We detect Maiden Claiming from the conditions
+// text (no structured classCode on the race row) and force an EX-only leg set.
+const EX_ONLY_GATE = "field_size_maiden_claim_9plus";
+const MAIDEN_CLAIM_MIN_FIELD = 9;
+
+// EX-only leg pattern: 100% of the race budget into the exacta, nothing else.
+// Matches the spec's legPattern = [0, 100, 0, 0, 0, 0] (win/place/show/EX/TRI/SUPER).
+const EX_ONLY_PATTERN: LegPattern = {
+  win: 0,
+  place: 0,
+  show: 0,
+  exacta: 100,
+  trifecta: 0,
+  superfecta: 0,
+};
+
+export function isMaidenClaiming(conditions: string | null | undefined): boolean {
+  const c = (conditions || "").toLowerCase();
+  const isMaiden = c.includes("maiden") || /\bm(dn|cl|sw)\b/.test(c) || c.includes("mdn");
+  const isClaim = c.includes("claim") || /\bclm\b/.test(c) || /\bmcl\b/.test(c);
+  return isMaiden && isClaim;
+}
+
+// True when this race should be forced to EX-only bets: a Maiden Claiming race
+// with a field of MAIDEN_CLAIM_MIN_FIELD or more entrants.
+export function shouldGateMaidenClaim(
+  conditions: string | null | undefined,
+  fieldSize: number | null | undefined,
+): boolean {
+  return isMaidenClaiming(conditions) && (fieldSize ?? 0) >= MAIDEN_CLAIM_MIN_FIELD;
 }
 
 export function hasChaosFlag(flags: string[]): boolean {
@@ -206,8 +248,13 @@ function buildRaceLegs(
 
 export type BudgetedRace = Pick<
   Race,
-  "id" | "tier" | "flags" | "winPgm" | "placePgm" | "showPgm" | "fourthPgm"
->;
+  "id" | "tier" | "flags" | "winPgm" | "placePgm" | "showPgm" | "fourthPgm" | "conditions"
+> & {
+  // PR #42 — entrant count for the Maiden Claim 9+ EX-only gate. The race row
+  // has no structured field-size column, so the caller supplies it (live count
+  // of non-scratched predictions). Optional: when absent the gate never fires.
+  fieldSize?: number | null;
+};
 
 // Build per-race bets for an entire card. Returns a map keyed by race id so the
 // caller can attach each race's bets onto its row.
@@ -249,15 +296,26 @@ export function buildBudgetedBets(
         demotedFrom = tier;
       }
     }
-    const pattern = config.legPatterns[patternTier] ?? DEFAULT_LEG_PATTERNS[patternTier];
+    let pattern = config.legPatterns[patternTier] ?? DEFAULT_LEG_PATTERNS[patternTier];
+
+    // PR #42 — Maiden Claim 9+ EX-only gate. Overrides the tier's leg pattern
+    // with EX-only (budget unchanged) so a chaotic full maiden-claiming field
+    // never sinks dollars into low-hit-rate TRI/SUPER variance.
+    const gates: string[] = [];
+    if (shouldGateMaidenClaim(p.row.conditions, p.row.fieldSize)) {
+      pattern = EX_ONLY_PATTERN;
+      gates.push(EX_ONLY_GATE);
+    }
 
     const legs = buildRaceLegs(p.row, raceBudget, pattern);
+    if (gates.length) for (const leg of legs) leg.gates = [...gates];
     out.set(p.row.id, {
       tier,
       raceAllocation: Math.round(raceBudget * 100) / 100,
       pass: legs.length === 0,
       legs,
       demotedFrom,
+      ...(gates.length ? { gates } : {}),
     });
   }
 

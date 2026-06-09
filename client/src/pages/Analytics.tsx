@@ -59,6 +59,45 @@ interface LedgerRoi {
   overall: RoiRow;
 }
 
+// PR #42 analytics tiles
+interface TierWeightPerfRow {
+  tier: string;
+  plannedWeight: number;
+  legs: number;
+  cost: number;
+  payout: number;
+  actualRoi: number | null;
+  winRate: number | null;
+  theoreticalContribution: number | null;
+}
+interface FlagPerfRow {
+  flag: string;
+  legs: number;
+  cost: number;
+  payout: number;
+  roi: number | null;
+  hitRate: number | null;
+}
+interface PassWinMissHorse {
+  raceNumber: number;
+  horseNumber: string;
+  name: string | null;
+  ourTier: string;
+  mlOdds: number | null;
+}
+interface PassWinMissCard {
+  cardId: number;
+  track: string;
+  date: string;
+  count: number;
+  horses: PassWinMissHorse[];
+}
+interface Pr42Analytics {
+  tierWeightPerf: TierWeightPerfRow[];
+  flagPerf: FlagPerfRow[];
+  passWinMisses: PassWinMissCard[];
+}
+
 const GOLD = "#C9A227";
 const GOLD_LIGHT = "#E8C14A";
 const WIN = "#4ADE80";
@@ -375,6 +414,132 @@ function RoiSections({ roi }: { roi: LedgerRoi }) {
   );
 }
 
+const FLAG_LABEL: Record<string, string> = {
+  ml_favorite_matched: "ML Favorite Matched (+5)",
+  speed_gap: "Speed-Gap Demotion",
+  field_size_maiden_claim_9plus: "Maiden Claim 9+ Gate",
+};
+
+function TierWeightPerf({ rows }: { rows: TierWeightPerfRow[] }) {
+  const any = rows.some((r) => r.legs > 0 || r.winRate != null);
+  return (
+    <div className="rounded-lg border border-gold/10 bg-navy-card p-4">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-3">Tier Weight Performance</div>
+      {!any ? (
+        <div className="text-xs text-muted-brand">No graded tier data in this scope yet.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-muted-brand uppercase tracking-[0.1em]">
+              <tr>
+                <th className="text-left py-2">Tier</th>
+                <th className="text-right py-2">Weight</th>
+                <th className="text-right py-2">Win%</th>
+                <th className="text-right py-2">Actual ROI</th>
+                <th className="text-right py-2">Theo.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.tier} className="border-t border-gold/5 text-silver" data-testid={`tierweight-row-${r.tier}`}>
+                  <td className="py-2 font-display font-bold">{r.tier}</td>
+                  <td className="py-2 text-right tabular-nums">{r.plannedWeight}</td>
+                  <td className="py-2 text-right tabular-nums">{r.winRate == null ? "—" : `${r.winRate}%`}</td>
+                  <td className={`py-2 text-right tabular-nums font-bold ${roiColor(r.actualRoi)}`}>{fmtRoi(r.actualRoi)}</td>
+                  <td className="py-2 text-right tabular-nums text-muted-brand">{r.theoreticalContribution == null ? "—" : r.theoreticalContribution}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FlagPerf({ rows }: { rows: FlagPerfRow[] }) {
+  const settled = rows.filter((r) => r.legs > 0);
+  return (
+    <div className="rounded-lg border border-gold/10 bg-navy-card p-4">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-3">Flag Performance</div>
+      {settled.length === 0 ? (
+        <div className="text-xs text-muted-brand">No settled flag legs in this scope yet.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-muted-brand uppercase tracking-[0.1em]">
+              <tr>
+                <th className="text-left py-2">Flag</th>
+                <th className="text-right py-2">Legs</th>
+                <th className="text-right py-2">Cost</th>
+                <th className="text-right py-2">Payout</th>
+                <th className="text-right py-2">ROI</th>
+                <th className="text-right py-2">Hit%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {settled.map((r) => (
+                <tr key={r.flag} className="border-t border-gold/5 text-silver" data-testid={`flagperf-row-${r.flag}`}>
+                  <td className="py-2 font-display font-bold">{FLAG_LABEL[r.flag] ?? r.flag}</td>
+                  <td className="py-2 text-right tabular-nums">{r.legs}</td>
+                  <td className="py-2 text-right tabular-nums">{fmtMoney(r.cost)}</td>
+                  <td className="py-2 text-right tabular-nums">{fmtMoney(r.payout)}</td>
+                  <td className={`py-2 text-right tabular-nums font-bold ${roiColor(r.roi)}`}>{fmtRoi(r.roi)}</td>
+                  <td className="py-2 text-right tabular-nums">{r.hitRate == null ? "—" : `${r.hitRate}%`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PassWinMisses({ cards }: { cards: PassWinMissCard[] }) {
+  return (
+    <div className="rounded-lg border border-gold/10 bg-navy-card p-4">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-3">PASS-WIN Misses</div>
+      {cards.length === 0 ? (
+        <div className="text-xs text-muted-brand">No PASS-WIN misses in this scope. Every PASS race's winner was off our board.</div>
+      ) : (
+        <div className="space-y-3">
+          {cards.map((c) => (
+            <div key={c.cardId} data-testid={`passwin-card-${c.cardId}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-display font-bold text-silver">{c.track} · {c.date}</span>
+                <span className="text-[11px] text-loss font-bold tabular-nums">{c.count} miss{c.count === 1 ? "" : "es"}</span>
+              </div>
+              <ul className="mt-1.5 space-y-1">
+                {c.horses.map((h, i) => (
+                  <li key={i} className="flex items-center gap-2 text-[11px] text-muted-brand tabular-nums" data-testid={`passwin-horse-${c.cardId}-${h.raceNumber}`}>
+                    <span className="text-gold-dark font-bold">R{h.raceNumber}</span>
+                    <span className="text-silver">#{h.horseNumber} {h.name ?? ""}</span>
+                    <span className="ml-auto">{h.ourTier}{h.mlOdds != null ? ` · ${h.mlOdds}-1 ML` : ""}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Pr42Sections({ data }: { data: Pr42Analytics }) {
+  return (
+    <div className="mt-6 space-y-4">
+      <h2 className="text-sm font-display font-black text-silver uppercase tracking-[0.14em]">PR #42 — Recal &amp; Conviction</h2>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <TierWeightPerf rows={data.tierWeightPerf} />
+        <FlagPerf rows={data.flagPerf} />
+      </div>
+      <PassWinMisses cards={data.passWinMisses} />
+    </div>
+  );
+}
+
 export default function Analytics() {
   const [scope, setScope] = useState<Scope>("today");
   const [selectedTrack, setSelectedTrack] = useState<string | null>(null);
@@ -451,6 +616,10 @@ export default function Analytics() {
 
   const { data: roi } = useQuery<LedgerRoi>({ queryKey: [roiUrl] });
 
+  // PR #42 tiles — same scope logic as roiUrl against /api/analytics/pr42
+  const pr42Url = useMemo(() => roiUrl.replace("/api/analytics/roi", "/api/analytics/pr42"), [roiUrl]);
+  const { data: pr42 } = useQuery<Pr42Analytics>({ queryKey: [pr42Url] });
+
   const scopeLabel = useMemo(() => {
     if (scope === "today") {
       if (todayCards.length >= 2 && todaySubTrack) return `Today · ${todaySubTrack}`;
@@ -513,6 +682,7 @@ export default function Analytics() {
             <>
               <Charts data={data} />
               {roi && <RoiSections roi={roi} />}
+              {pr42 && <Pr42Sections data={pr42} />}
             </>
           )}
         </>
