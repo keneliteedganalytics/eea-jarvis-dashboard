@@ -299,7 +299,66 @@ CREATE TABLE IF NOT EXISTS race_weather (
   source TEXT NOT NULL DEFAULT 'openweather',
   fetched_at TEXT NOT NULL
 );
+
+-- ── Brisnet deep-field ingest (PR #28b) ───────────────────────────────────
+-- Per-race Track Bias snapshot, one row per (date,track,race,scope). MEET +
+-- WEEK both stored. Keyed unique so re-ingest upserts. Powers bias_match.
+CREATE TABLE IF NOT EXISTS brisnet_race_bias (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  race_date TEXT NOT NULL,
+  track_code TEXT NOT NULL,
+  race_number INTEGER NOT NULL,
+  scope TEXT NOT NULL, -- MEET | WEEK
+  surface TEXT,
+  distance TEXT,
+  num_races INTEGER,
+  date_range_start TEXT,
+  date_range_end TEXT,
+  wire_pct REAL,
+  speed_bias_pct REAL,
+  wnr_avg_bl_1c REAL,
+  wnr_avg_bl_2c REAL,
+  iv_e REAL, iv_ep REAL, iv_p REAL, iv_s REAL,
+  pct_e REAL, pct_ep REAL, pct_p REAL, pct_s REAL,
+  dominant_style TEXT,
+  favorable_styles TEXT, -- JSON array
+  iv_rail REAL, iv_1_3 REAL, iv_4_7 REAL, iv_8plus REAL,
+  pct_rail REAL, pct_1_3 REAL, pct_4_7 REAL, pct_8plus REAL,
+  favorable_posts TEXT, -- JSON array
+  ingested_at TEXT NOT NULL,
+  UNIQUE (race_date, track_code, race_number, scope)
+);
+
+-- Per-race BRIS pars (E1, E2/late, SPD), one row per (date,track,race). These
+-- also ride on brisnet_horse_data via the DRM path; this table is the canonical
+-- deep-ingest copy keyed at the race level.
+CREATE TABLE IF NOT EXISTS brisnet_race_pars (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  race_date TEXT NOT NULL,
+  track_code TEXT NOT NULL,
+  race_number INTEGER NOT NULL,
+  par_e1 REAL,
+  par_e2_late REAL,
+  par_spd REAL,
+  surface TEXT,
+  distance_furlongs REAL,
+  ingested_at TEXT NOT NULL,
+  UNIQUE (race_date, track_code, race_number)
+);
 `);
+
+// Idempotent brisnet_race_pars migration: surface + distance are race-level deep
+// fields the Fusion v3 conditions_pedigree feature needs. Added after the table
+// shipped, so guard for installs that predate these columns.
+const parsCols = new Set(
+  (sqlite.prepare("PRAGMA table_info(brisnet_race_pars)").all() as { name: string }[]).map(
+    (c) => c.name,
+  ),
+);
+if (!parsCols.has("surface")) sqlite.exec("ALTER TABLE brisnet_race_pars ADD COLUMN surface TEXT");
+if (!parsCols.has("distance_furlongs")) {
+  sqlite.exec("ALTER TABLE brisnet_race_pars ADD COLUMN distance_furlongs REAL");
+}
 
 // Idempotent settings-column migration for installs that predate EEA v1.
 const settingsCols = new Set(
@@ -376,6 +435,55 @@ addBrisnetHorseCol("sire_name", "sire_name TEXT");
 addBrisnetHorseCol("dam_name", "dam_name TEXT");
 addBrisnetHorseCol("dam_sire_name", "dam_sire_name TEXT");
 addBrisnetHorseCol("pedigree_stats", "pedigree_stats TEXT"); // JSON int array
+
+// PR #28b — Brisnet deep-field ingest. Headline scalar fields the computed
+// features read directly get typed columns; the nested per-runner blocks
+// (jockey, trainer angles, last-10 past lines, workouts, race-summary derived)
+// are stored as JSON, matching the existing pedigree_stats / bias_context_json
+// precedent. Every column nullable so a thin/DRM-only card degrades gracefully.
+// ── header block ──
+addBrisnetHorseCol("prime_power_rank", "prime_power_rank INTEGER");
+addBrisnetHorseCol("early_speed_points", "early_speed_points INTEGER");
+addBrisnetHorseCol("ped_fast", "ped_fast REAL");
+addBrisnetHorseCol("ped_off", "ped_off REAL");
+addBrisnetHorseCol("ped_distance", "ped_distance REAL");
+addBrisnetHorseCol("ped_turf", "ped_turf REAL");
+addBrisnetHorseCol("med_lasix", "med_lasix TEXT");
+addBrisnetHorseCol("med_bute", "med_bute INTEGER");
+addBrisnetHorseCol("blinkers", "blinkers TEXT");
+addBrisnetHorseCol("weight_carried", "weight_carried REAL");
+addBrisnetHorseCol("apprentice_allowance", "apprentice_allowance REAL");
+addBrisnetHorseCol("denotation", "denotation TEXT");
+addBrisnetHorseCol("claim_price", "claim_price REAL");
+addBrisnetHorseCol("dpi", "dpi REAL");
+addBrisnetHorseCol("spi", "spi REAL");
+addBrisnetHorseCol("sire_awd", "sire_awd REAL");
+addBrisnetHorseCol("dam_sire_awd", "dam_sire_awd REAL");
+addBrisnetHorseCol("sire_mud_pct", "sire_mud_pct REAL");
+addBrisnetHorseCol("sire_mud_starts", "sire_mud_starts INTEGER");
+addBrisnetHorseCol("sire_turf_pct", "sire_turf_pct REAL");
+addBrisnetHorseCol("sire_fts_pct", "sire_fts_pct REAL");
+addBrisnetHorseCol("sire_first_turf_pct", "sire_first_turf_pct REAL");
+addBrisnetHorseCol("owner_name", "owner_name TEXT");
+addBrisnetHorseCol("life_record", "life_record TEXT"); // JSON RunnerRecord
+addBrisnetHorseCol("cy_record", "cy_record TEXT");
+addBrisnetHorseCol("py_record", "py_record TEXT");
+addBrisnetHorseCol("track_record", "track_record TEXT");
+addBrisnetHorseCol("fst_record", "fst_record TEXT");
+addBrisnetHorseCol("off_record", "off_record TEXT");
+addBrisnetHorseCol("dis_record", "dis_record TEXT");
+addBrisnetHorseCol("trf_record", "trf_record TEXT");
+addBrisnetHorseCol("aw_record", "aw_record TEXT");
+// ── connections (JSON blocks) ──
+addBrisnetHorseCol("jockey_block", "jockey_block TEXT"); // JSON JockeyBlock
+addBrisnetHorseCol("trainer_block", "trainer_block TEXT"); // JSON TrainerBlock
+// ── per-start + workout arrays (JSON) ──
+addBrisnetHorseCol("past_lines", "past_lines TEXT"); // JSON DeepPastLine[]
+addBrisnetHorseCol("workouts", "workouts TEXT"); // JSON DeepWorkout[]
+// ── Ultimate Race Summary derived block (JSON) ──
+addBrisnetHorseCol("race_summary", "race_summary TEXT"); // JSON RaceSummaryDerived
+// ── ml odds (numeric) for the deep path ──
+addBrisnetHorseCol("ml_odds_deep", "ml_odds_deep REAL");
 
 // Idempotent predictions-column migration for PR #16 Phase 2: persist the
 // per-horse bloodstock adjustment (applied/composite/confidence/reasonCodes)

@@ -1,0 +1,1052 @@
+{
+  "track": "SAR",
+  "date": "2026-06-07",
+  "races": [
+    {
+      "raceNumber": 1,
+      "conditionsRaw": "MAIDEN SPECIAL WEIGHT 3YO F&M 6F DIRT",
+      "surface": "DIRT",
+      "distanceFurlongs": 6,
+      "pars": { "parE1": 88, "parE2Late": 84, "parSpd": 86 },
+      "bias": [
+        {
+          "scope": "MEET",
+          "surface": "DIRT",
+          "distance": "SPRINT",
+          "numRaces": 42,
+          "dateRangeStart": "2026-05-15",
+          "dateRangeEnd": "2026-06-07",
+          "wirePct": 31,
+          "speedBiasPct": 38,
+          "wnrAvgBl1c": 1.2,
+          "wnrAvgBl2c": 0.8,
+          "ivE": 1.84, "ivEp": 1.31, "ivP": 0.74, "ivS": 0.52,
+          "pctE": 41, "pctEp": 28, "pctP": 19, "pctS": 12,
+          "dominantStyle": "E",
+          "favorableStyles": ["E", "E/P"],
+          "ivRail": 1.42, "iv1_3": 1.18, "iv4_7": 0.88, "iv8plus": 0.61,
+          "pctRail": 22, "pct1_3": 38, "pct4_7": 28, "pct8plus": 12,
+          "favorablePosts": ["RAIL", "1_3"]
+        },
+        {
+          "scope": "WEEK",
+          "surface": "DIRT",
+          "distance": "SPRINT",
+          "numRaces": 11,
+          "dateRangeStart": "2026-06-01",
+          "dateRangeEnd": "2026-06-07",
+          "wirePct": 36,
+          "speedBiasPct": 44,
+          "wnrAvgBl1c": 0.9,
+          "wnrAvgBl2c": 0.5,
+          "ivE": 2.1, "ivEp": 1.2, "ivP": 0.6, "ivS": 0.4,
+          "pctE": 45, "pctEp": 27, "pctP": 16, "pctS": 12,
+          "dominantStyle": "E",
+          "favorableStyles": ["E"],
+          "ivRail": 1.55, "iv1_3": 1.22, "iv4_7": 0.8, "iv8plus": 0.5,
+          "pctRail": 27, "pct1_3": 40, "pct4_7": 23, "pct8plus": 10,
+          "favorablePosts": ["RAIL", "1_3"]
+        }
+      ],
+      "runners": [
+        {
+          "programNumber": "3",
+          "horseName": "Beev's Blessing",
+          "sireName": "Practical Joke",
+          "damName": "Blessed Halo",
+          "damSireName": "More Than Ready",
+          "mlOdds": 2.5,
+          "header": {
+            "primePower": 142.0, "primePowerRank": 1, "runStyle": "P", "earlySpeedPoints": 2,
+            "pedFast": 1.04, "pedOff": 0.92, "pedDistance": 1.01, "pedTurf": 0.88,
+            "medLasix": "L", "medBute": true, "blinkers": "NONE",
+            "weightCarried": 120, "apprenticeAllowance": 0, "denotation": "NONE", "claimPrice": null,
+            "dpi": 2.4, "spi": 1.6, "sireAwd": 6.8, "damSireAwd": 7.2,
+            "sireMudPct": 14, "sireMudStarts": 88, "sireTurfPct": 11, "sireFtsPct": 16, "sireFirstTurfPct": 9,
+            "ownerName": "Repole Stable",
+            "lifeRecord": { "starts": 4, "first": 0, "second": 2, "third": 1, "earnings": 38000, "bestSpd": 84 },
+            "cyRecord": { "starts": 4, "first": 0, "second": 2, "third": 1, "earnings": 38000, "bestSpd": 84 },
+            "fstRecord": { "starts": 4, "first": 0, "second": 2, "third": 1, "earnings": 38000, "bestSpd": 84 }
+          },
+          "jockey": {
+            "meetMounts": 60, "meet1": 8, "meet2": 9, "meet3": 7, "meetWinPct": 13,
+            "yearMounts": 410, "yearWinPct": 14, "yearItmPct": 41, "yearRoi": -0.18,
+            "runStyleMounts": 120, "runStyleWinPct": 12, "runStyleItmPct": 38, "runStyleRoi": -0.22,
+            "trnL60Mounts": 12, "trnL60WinPct": 8, "trnL60ItmPct": 25, "trnL60Roi": -0.4,
+            "distSurfMounts": 95, "distSurfWinPct": 13, "distSurfItmPct": 39, "distSurfRoi": -0.2
+          },
+          "trainer": {
+            "meetStarts": 40, "meet1": 6, "meet2": 5, "meet3": 6, "meetWinPct": 15,
+            "yearStarts": 280, "yearWinPct": 16, "yearItmPct": 44, "yearRoi": -0.1,
+            "angles3yr": {
+              "first_lasix": { "starts": 0, "winPct": null, "itmPct": null, "roi": null }
+            }
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-10", "track": "SAR", "raceNum": 2, "surface": "DIRT", "distanceFurlongs": 6,
+              "condition": "ft", "raceType": "MSW", "rr": 64, "cr": 38, "e1": 80, "e2": 78, "lp": 79, "spd": 80,
+              "post": 5, "stPos": 6, "stLengths": 4.5, "c1Pos": 5, "c1Lengths": 3.5, "c2Pos": 4, "c2Lengths": 2.5,
+              "strPos": 3, "strLengths": 1.5, "finPos": 2, "finLengths": 1.0, "jockey": "Ortiz J", "weight": 120,
+              "med": "L", "equip": null, "odds": 3.1, "comment": "rallied belatedly", "fieldSize": 8,
+              "raceShape1c": 0, "raceShape2c": 1,
+              "top3": [{ "name": "Wonder Filly", "margin": 0, "bold": true, "italic": false }]
+            },
+            {
+              "date": "2026-04-18", "track": "AQU", "raceNum": 4, "surface": "DIRT", "distanceFurlongs": 6,
+              "condition": "ft", "raceType": "MSW", "rr": 66, "cr": 40, "e1": 78, "e2": 77, "lp": 80, "spd": 79,
+              "post": 3, "stPos": 7, "stLengths": 5.0, "c1Pos": 6, "c1Lengths": 4.0, "c2Pos": 5, "c2Lengths": 3.0,
+              "strPos": 3, "strLengths": 1.8, "finPos": 2, "finLengths": 0.75, "jockey": "Ortiz J", "weight": 120,
+              "med": "L", "equip": null, "odds": 2.4, "comment": "no late kick", "fieldSize": 9,
+              "raceShape1c": -1, "raceShape2c": 0,
+              "top3": []
+            },
+            {
+              "date": "2026-03-22", "track": "AQU", "raceNum": 3, "surface": "DIRT", "distanceFurlongs": 6,
+              "condition": "ft", "raceType": "MSW", "rr": 65, "cr": 39, "e1": 79, "e2": 76, "lp": 78, "spd": 78,
+              "post": 4, "stPos": 8, "stLengths": 6.0, "c1Pos": 7, "c1Lengths": 5.0, "c2Pos": 6, "c2Lengths": 3.5,
+              "strPos": 4, "strLengths": 2.0, "finPos": 3, "finLengths": 1.5, "jockey": "Davis D", "weight": 120,
+              "med": "L", "equip": null, "odds": 4.0, "comment": "evenly late", "fieldSize": 10,
+              "raceShape1c": 0, "raceShape2c": 0,
+              "top3": []
+            }
+          ],
+          "workouts": [
+            { "date": "2026-06-01", "bullet": false, "track": "SAR", "distanceFurlongs": 4, "condition": "ft", "time": 48.6, "style": "B", "fromGate": false, "rankPosition": 18, "rankTotal": 42 }
+          ],
+          "summary": {
+            "avgDsE1": 79, "avgDsE2": 77, "avgDsLate": 79, "avgDsSpd": 79, "avgDsSampleFlag": "ASTERISK",
+            "avgRaceRtng": 65, "bestPaceE1": 80, "bestPaceE2": 78, "bestPaceLp": 80,
+            "finalSpd1": 80, "finalSpd2": 79, "finalSpd3": 78, "finalSpd4": null,
+            "acl": 64, "aclDistSurfMatch": true, "regSpdAvg": 79,
+            "prevRr1": 64, "prevRr2": 66, "prevRr3": 65,
+            "daysSinceLr": 28, "layoffCount": 0,
+            "speedLastRace": 80, "backSpeed": 79, "currentClass": 38, "avgClassLast3": 39,
+            "earlyPaceLastRace": 80, "latePaceLastRace": 79
+          }
+        },
+        {
+          "programNumber": "6",
+          "horseName": "Painted Stones",
+          "sireName": "Gun Runner",
+          "damName": "Canvas Sky",
+          "damSireName": "Tapit",
+          "mlOdds": 6.0,
+          "header": {
+            "primePower": 136.0, "primePowerRank": 4, "runStyle": "E", "earlySpeedPoints": 7,
+            "pedFast": 1.18, "pedOff": 1.05, "pedDistance": 1.02, "pedTurf": 0.9,
+            "medLasix": "FIRST_L", "medBute": true, "blinkers": "ON",
+            "weightCarried": 120, "apprenticeAllowance": 0, "denotation": "NONE", "claimPrice": null,
+            "dpi": 3.1, "spi": 2.4, "sireAwd": 6.2, "damSireAwd": 7.8,
+            "sireMudPct": 19, "sireMudStarts": 140, "sireTurfPct": 9, "sireFtsPct": 22, "sireFirstTurfPct": 7,
+            "ownerName": "Winchell Thoroughbreds",
+            "lifeRecord": { "starts": 2, "first": 0, "second": 1, "third": 0, "earnings": 16000, "bestSpd": 88 },
+            "cyRecord": { "starts": 2, "first": 0, "second": 1, "third": 0, "earnings": 16000, "bestSpd": 88 },
+            "fstRecord": { "starts": 2, "first": 0, "second": 1, "third": 0, "earnings": 16000, "bestSpd": 88 }
+          },
+          "jockey": {
+            "meetMounts": 88, "meet1": 18, "meet2": 12, "meet3": 11, "meetWinPct": 20,
+            "yearMounts": 520, "yearWinPct": 21, "yearItmPct": 52, "yearRoi": 0.12,
+            "runStyleMounts": 210, "runStyleWinPct": 24, "runStyleItmPct": 55, "runStyleRoi": 0.18,
+            "trnL60Mounts": 24, "trnL60WinPct": 29, "trnL60ItmPct": 58, "trnL60Roi": 0.42,
+            "distSurfMounts": 160, "distSurfWinPct": 23, "distSurfItmPct": 53, "distSurfRoi": 0.15
+          },
+          "trainer": {
+            "meetStarts": 55, "meet1": 14, "meet2": 9, "meet3": 8, "meetWinPct": 25,
+            "yearStarts": 320, "yearWinPct": 24, "yearItmPct": 56, "yearRoi": 0.22,
+            "angles3yr": {
+              "first_lasix": { "starts": 140, "winPct": 26, "itmPct": 54, "roi": 0.31 },
+              "blinkers_on": { "starts": 95, "winPct": 28, "itmPct": 57, "roi": 0.44 },
+              "2nd_start": { "starts": 220, "winPct": 24, "itmPct": 55, "roi": 0.2 }
+            }
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-09", "track": "SAR", "raceNum": 1, "surface": "DIRT", "distanceFurlongs": 6,
+              "condition": "ft", "raceType": "MSW", "rr": 78, "cr": 72, "e1": 92, "e2": 88, "lp": 82, "spd": 88,
+              "post": 1, "stPos": 1, "stLengths": -1.5, "c1Pos": 1, "c1Lengths": -2.0, "c2Pos": 1, "c2Lengths": -1.5,
+              "strPos": 1, "strLengths": -1.0, "finPos": 2, "finLengths": 0.5, "jockey": "Rosario J", "weight": 120,
+              "med": "L", "equip": null, "odds": 5.5, "comment": "set pace, caught late", "fieldSize": 9,
+              "raceShape1c": 2, "raceShape2c": 2,
+              "top3": [{ "name": "Late Mover", "margin": 0.5, "bold": false, "italic": false }]
+            }
+          ],
+          "workouts": [
+            { "date": "2026-06-02", "bullet": true, "track": "SAR", "distanceFurlongs": 4, "condition": "ft", "time": 47.2, "style": "B", "fromGate": true, "rankPosition": 1, "rankTotal": 44 },
+            { "date": "2026-05-25", "bullet": false, "track": "SAR", "distanceFurlongs": 5, "condition": "ft", "time": 59.8, "style": "B", "fromGate": false, "rankPosition": 4, "rankTotal": 30 }
+          ],
+          "summary": {
+            "avgDsE1": 92, "avgDsE2": 88, "avgDsLate": 82, "avgDsSpd": 88, "avgDsSampleFlag": "ASTERISK",
+            "avgRaceRtng": 78, "bestPaceE1": 92, "bestPaceE2": 88, "bestPaceLp": 82,
+            "finalSpd1": 88, "finalSpd2": null, "finalSpd3": null, "finalSpd4": null,
+            "acl": 74, "aclDistSurfMatch": true, "regSpdAvg": 88,
+            "prevRr1": 78, "prevRr2": null, "prevRr3": null,
+            "daysSinceLr": 29, "layoffCount": 0,
+            "speedLastRace": 88, "backSpeed": 88, "currentClass": 72, "avgClassLast3": 72,
+            "earlyPaceLastRace": 92, "latePaceLastRace": 82
+          }
+        },
+        {
+          "programNumber": "2",
+          "horseName": "Slow Burn",
+          "sireName": "Curlin",
+          "damName": "Ember Glow",
+          "damSireName": "Distorted Humor",
+          "mlOdds": 4.0,
+          "header": {
+            "primePower": 138.0, "primePowerRank": 2, "runStyle": "S", "earlySpeedPoints": 1,
+            "pedFast": 0.98, "pedOff": 0.9, "pedDistance": 1.06, "pedTurf": 0.95,
+            "medLasix": "L", "medBute": true, "blinkers": "NONE",
+            "weightCarried": 120, "apprenticeAllowance": 0, "denotation": "NONE",
+            "dpi": 1.9, "spi": 1.2, "sireAwd": 7.4, "damSireAwd": 6.9,
+            "sireMudPct": 16, "sireMudStarts": 200, "sireTurfPct": 13, "sireFtsPct": 14, "sireFirstTurfPct": 10,
+            "ownerName": "Stonestreet Stables",
+            "lifeRecord": { "starts": 3, "first": 0, "second": 0, "third": 2, "earnings": 14000, "bestSpd": 82 }
+          },
+          "jockey": {
+            "meetMounts": 50, "meet1": 5, "meetWinPct": 10, "yearWinPct": 11, "yearItmPct": 34, "yearRoi": -0.3,
+            "trnL60Mounts": 8, "trnL60WinPct": 12, "trnL60ItmPct": 37, "trnL60Roi": -0.1
+          },
+          "trainer": {
+            "meetStarts": 30, "meetWinPct": 13, "yearWinPct": 14, "yearItmPct": 40, "yearRoi": -0.05,
+            "angles3yr": {}
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-12", "track": "SAR", "raceNum": 3, "surface": "DIRT", "distanceFurlongs": 6,
+              "condition": "ft", "raceType": "MSW", "rr": 62, "cr": 50, "e1": 70, "e2": 74, "lp": 81, "spd": 78,
+              "post": 6, "stPos": 9, "stLengths": 8.0, "c1Pos": 8, "c1Lengths": 6.0, "c2Pos": 6, "c2Lengths": 4.0,
+              "strPos": 4, "strLengths": 2.5, "finPos": 3, "finLengths": 2.0, "jockey": "Franco M", "weight": 120,
+              "med": "L", "comment": "no menace", "fieldSize": 9, "raceShape1c": -2, "raceShape2c": -1, "top3": []
+            }
+          ],
+          "workouts": [
+            { "date": "2026-05-30", "bullet": false, "track": "SAR", "distanceFurlongs": 4, "condition": "ft", "time": 49.4, "style": "B", "fromGate": false, "rankPosition": 30, "rankTotal": 42 }
+          ],
+          "summary": {
+            "avgDsE1": 70, "avgDsE2": 74, "avgDsLate": 81, "avgDsSpd": 78, "avgDsSampleFlag": "NONE",
+            "avgRaceRtng": 62, "bestPaceE1": 70, "bestPaceE2": 74, "bestPaceLp": 81,
+            "finalSpd1": 78, "finalSpd2": null, "finalSpd3": null, "finalSpd4": null,
+            "acl": 60, "aclDistSurfMatch": true, "regSpdAvg": 78,
+            "prevRr1": 62, "daysSinceLr": 26, "layoffCount": 0,
+            "speedLastRace": 78, "backSpeed": 78, "currentClass": 50, "avgClassLast3": 50,
+            "earlyPaceLastRace": 70, "latePaceLastRace": 81
+          }
+        },
+        {
+          "programNumber": "5",
+          "horseName": "Quiet Margin",
+          "sireName": "Into Mischief",
+          "damName": "Margin Call",
+          "damSireName": "Bernardini",
+          "mlOdds": 8.0,
+          "header": {
+            "primePower": 134.0, "primePowerRank": 5, "runStyle": "E/P", "earlySpeedPoints": 5,
+            "pedFast": 1.06, "pedOff": 0.95, "pedDistance": 0.98, "pedTurf": 0.92,
+            "medLasix": "L", "medBute": true, "blinkers": "NONE",
+            "weightCarried": 120, "denotation": "NONE",
+            "dpi": 2.6, "spi": 1.8, "sireAwd": 6.5, "damSireAwd": 7.0,
+            "sireMudPct": 15, "sireMudStarts": 300, "sireTurfPct": 12, "sireFtsPct": 18,
+            "ownerName": "Spendthrift Farm",
+            "lifeRecord": { "starts": 3, "first": 0, "second": 1, "third": 0, "earnings": 12000, "bestSpd": 83 }
+          },
+          "jockey": {
+            "meetMounts": 70, "meetWinPct": 16, "yearWinPct": 15, "yearItmPct": 42, "yearRoi": -0.12,
+            "trnL60Mounts": 14, "trnL60WinPct": 14, "trnL60ItmPct": 40, "trnL60Roi": -0.08
+          },
+          "trainer": {
+            "meetStarts": 35, "meetWinPct": 17, "yearWinPct": 18, "yearItmPct": 46, "yearRoi": 0.02,
+            "angles3yr": { "2nd_start": { "starts": 120, "winPct": 18, "itmPct": 45, "roi": 0.05 } }
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-15", "track": "SAR", "raceNum": 5, "surface": "DIRT", "distanceFurlongs": 6,
+              "condition": "ft", "raceType": "MSW", "rr": 70, "cr": 58, "e1": 84, "e2": 82, "lp": 78, "spd": 83,
+              "post": 2, "stPos": 2, "stLengths": 1.0, "c1Pos": 2, "c1Lengths": 1.5, "c2Pos": 3, "c2Lengths": 2.0,
+              "strPos": 4, "strLengths": 3.0, "finPos": 4, "finLengths": 3.5, "jockey": "Castellano J", "weight": 120,
+              "med": "L", "comment": "pressed, faded", "fieldSize": 8, "raceShape1c": 1, "raceShape2c": 1, "top3": []
+            }
+          ],
+          "workouts": [
+            { "date": "2026-05-31", "bullet": false, "track": "SAR", "distanceFurlongs": 4, "condition": "ft", "time": 48.8, "style": "H", "fromGate": false, "rankPosition": 12, "rankTotal": 42 }
+          ],
+          "summary": {
+            "avgDsE1": 84, "avgDsE2": 82, "avgDsLate": 78, "avgDsSpd": 83, "avgDsSampleFlag": "NONE",
+            "avgRaceRtng": 70, "bestPaceE1": 84, "bestPaceE2": 82, "bestPaceLp": 78,
+            "finalSpd1": 83, "finalSpd2": null, "finalSpd3": null, "finalSpd4": null,
+            "acl": 66, "aclDistSurfMatch": true, "regSpdAvg": 83,
+            "prevRr1": 70, "daysSinceLr": 23, "layoffCount": 0,
+            "speedLastRace": 83, "backSpeed": 83, "currentClass": 58, "avgClassLast3": 58,
+            "earlyPaceLastRace": 84, "latePaceLastRace": 78
+          }
+        }
+      ]
+    },
+    {
+      "raceNumber": 2,
+      "conditionsRaw": "ALLOWANCE OPTIONAL CLAIMING 4YO+ 1 1/16M TURF",
+      "surface": "TURF",
+      "distanceFurlongs": 8.5,
+      "pars": { "parE1": 90, "parE2Late": 92, "parSpd": 94 },
+      "bias": [
+        {
+          "scope": "MEET", "surface": "TURF", "distance": "ROUTE", "numRaces": 30,
+          "dateRangeStart": "2026-05-15", "dateRangeEnd": "2026-06-07",
+          "wirePct": 18, "speedBiasPct": 22,
+          "ivE": 0.92, "ivEp": 1.05, "ivP": 1.18, "ivS": 1.22,
+          "pctE": 16, "pctEp": 24, "pctP": 32, "pctS": 28,
+          "dominantStyle": "S", "favorableStyles": ["P", "S"],
+          "ivRail": 0.85, "iv1_3": 0.95, "iv4_7": 1.12, "iv8plus": 1.2,
+          "pctRail": 12, "pct1_3": 24, "pct4_7": 34, "pct8plus": 30,
+          "favorablePosts": ["4_7", "8PLUS"]
+        },
+        {
+          "scope": "WEEK", "surface": "TURF", "distance": "ROUTE", "numRaces": 8,
+          "dateRangeStart": "2026-06-01", "dateRangeEnd": "2026-06-07",
+          "wirePct": 20, "speedBiasPct": 25,
+          "ivE": 1.0, "ivEp": 1.05, "ivP": 1.1, "ivS": 1.15,
+          "pctE": 18, "pctEp": 25, "pctP": 30, "pctS": 27,
+          "dominantStyle": "S", "favorableStyles": ["S"],
+          "favorablePosts": ["4_7"]
+        }
+      ],
+      "runners": [
+        {
+          "programNumber": "4",
+          "horseName": "Lone Front",
+          "sireName": "War Front",
+          "damName": "Solitary",
+          "damSireName": "Galileo",
+          "mlOdds": 3.0,
+          "header": {
+            "primePower": 150.0, "primePowerRank": 1, "runStyle": "E", "earlySpeedPoints": 8,
+            "pedFast": 1.1, "pedOff": 0.96, "pedDistance": 1.04, "pedTurf": 1.22,
+            "medLasix": "L", "medBute": true, "blinkers": "NONE",
+            "weightCarried": 122, "denotation": "NONE",
+            "dpi": 2.0, "spi": 1.5, "sireAwd": 8.2, "damSireAwd": 9.1,
+            "sireMudPct": 12, "sireTurfPct": 21, "sireFtsPct": 11,
+            "ownerName": "Juddmonte",
+            "lifeRecord": { "starts": 14, "first": 4, "second": 3, "third": 2, "earnings": 240000, "bestSpd": 98 }
+          },
+          "jockey": {
+            "meetMounts": 88, "meetWinPct": 20, "yearWinPct": 19, "yearItmPct": 50, "yearRoi": 0.05,
+            "trnL60Mounts": 20, "trnL60WinPct": 18, "trnL60ItmPct": 48, "trnL60Roi": 0.0
+          },
+          "trainer": {
+            "meetStarts": 50, "meetWinPct": 18, "yearWinPct": 17, "yearItmPct": 45, "yearRoi": -0.04,
+            "angles3yr": { "turf": { "starts": 200, "winPct": 16, "itmPct": 44, "roi": -0.1 } }
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-08", "track": "BEL", "raceNum": 7, "surface": "TURF", "distanceFurlongs": 8.5,
+              "condition": "fm", "raceType": "ALW", "rr": 92, "cr": 90, "e1": 96, "e2": 90, "lp": 80, "spd": 94,
+              "post": 3, "stPos": 1, "stLengths": -2.0, "c1Pos": 1, "c1Lengths": -2.5, "c2Pos": 1, "c2Lengths": -2.0,
+              "strPos": 1, "strLengths": -1.0, "finPos": 3, "finLengths": 1.5, "jockey": "Ortiz I", "weight": 122,
+              "med": "L", "comment": "set fast pace, faltered late", "fieldSize": 10, "raceShape1c": 3, "raceShape2c": 3,
+              "top3": [{ "name": "Closer One", "margin": 1.5, "bold": false, "italic": false }]
+            }
+          ],
+          "workouts": [
+            { "date": "2026-06-01", "bullet": false, "track": "SAR", "turf": true, "distanceFurlongs": 4, "condition": "fm", "time": 49.0, "style": "B", "fromGate": false, "rankPosition": 8, "rankTotal": 20 }
+          ],
+          "summary": {
+            "avgDsE1": 96, "avgDsE2": 90, "avgDsLate": 80, "avgDsSpd": 94, "avgDsSampleFlag": "ASTERISK",
+            "avgRaceRtng": 92, "bestPaceE1": 96, "bestPaceE2": 90, "bestPaceLp": 80,
+            "finalSpd1": 94, "finalSpd2": 92, "finalSpd3": 95, "finalSpd4": 93,
+            "acl": 90, "aclDistSurfMatch": true, "regSpdAvg": 93,
+            "prevRr1": 92, "prevRr2": 90, "prevRr3": 91,
+            "daysSinceLr": 30, "layoffCount": 0,
+            "speedLastRace": 94, "backSpeed": 95, "currentClass": 90, "avgClassLast3": 90,
+            "earlyPaceLastRace": 96, "latePaceLastRace": 80
+          }
+        },
+        {
+          "programNumber": "7",
+          "horseName": "Closing Argument",
+          "sireName": "Kitten's Joy",
+          "damName": "Final Word",
+          "damSireName": "Sadler's Wells",
+          "mlOdds": 4.5,
+          "header": {
+            "primePower": 148.0, "primePowerRank": 2, "runStyle": "S", "earlySpeedPoints": 1,
+            "pedFast": 1.0, "pedOff": 0.94, "pedDistance": 1.1, "pedTurf": 1.28,
+            "medLasix": "L", "medBute": true, "blinkers": "NONE",
+            "weightCarried": 120, "denotation": "NONE",
+            "dpi": 1.6, "spi": 1.1, "sireAwd": 9.4, "damSireAwd": 10.2,
+            "sireMudPct": 11, "sireTurfPct": 26, "sireFtsPct": 9,
+            "ownerName": "Klaravich Stables",
+            "lifeRecord": { "starts": 18, "first": 5, "second": 4, "third": 3, "earnings": 380000, "bestSpd": 96 }
+          },
+          "jockey": {
+            "meetMounts": 90, "meetWinPct": 22, "yearWinPct": 23, "yearItmPct": 54, "yearRoi": 0.16,
+            "trnL60Mounts": 28, "trnL60WinPct": 25, "trnL60ItmPct": 56, "trnL60Roi": 0.3
+          },
+          "trainer": {
+            "meetStarts": 60, "meetWinPct": 23, "yearWinPct": 22, "yearItmPct": 52, "yearRoi": 0.14,
+            "angles3yr": { "turf": { "starts": 260, "winPct": 24, "itmPct": 55, "roi": 0.2 }, "route": { "starts": 180, "winPct": 25, "itmPct": 56, "roi": 0.25 } }
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-10", "track": "BEL", "raceNum": 8, "surface": "TURF", "distanceFurlongs": 8.5,
+              "condition": "fm", "raceType": "ALW", "rr": 94, "cr": 92, "e1": 82, "e2": 88, "lp": 96, "spd": 95,
+              "post": 8, "stPos": 9, "stLengths": 7.0, "c1Pos": 9, "c1Lengths": 6.5, "c2Pos": 7, "c2Lengths": 4.0,
+              "strPos": 3, "strLengths": 1.5, "finPos": 1, "finLengths": -0.75, "jockey": "Velazquez J", "weight": 120,
+              "med": "L", "comment": "swung wide, drew clear", "fieldSize": 11, "raceShape1c": -3, "raceShape2c": -2,
+              "top3": [{ "name": "Closing Argument", "margin": -0.75, "bold": true, "italic": false }]
+            },
+            {
+              "date": "2026-04-15", "track": "KEE", "raceNum": 9, "surface": "TURF", "distanceFurlongs": 9,
+              "condition": "fm", "raceType": "ALW", "rr": 93, "cr": 91, "e1": 80, "e2": 86, "lp": 95, "spd": 94,
+              "post": 10, "stPos": 11, "stLengths": 8.0, "c1Pos": 10, "c1Lengths": 7.0, "c2Pos": 8, "c2Lengths": 5.0,
+              "strPos": 4, "strLengths": 2.0, "finPos": 2, "finLengths": 0.5, "jockey": "Velazquez J", "weight": 120,
+              "med": "L", "comment": "rallied, just missed", "fieldSize": 12, "raceShape1c": -3, "raceShape2c": -2, "top3": []
+            }
+          ],
+          "workouts": [
+            { "date": "2026-06-02", "bullet": true, "track": "SAR", "turf": true, "distanceFurlongs": 5, "condition": "fm", "time": 59.2, "style": "B", "fromGate": false, "rankPosition": 1, "rankTotal": 18 }
+          ],
+          "summary": {
+            "avgDsE1": 81, "avgDsE2": 87, "avgDsLate": 95, "avgDsSpd": 94, "avgDsSampleFlag": "ASTERISK",
+            "avgRaceRtng": 93, "bestPaceE1": 82, "bestPaceE2": 88, "bestPaceLp": 96,
+            "finalSpd1": 95, "finalSpd2": 94, "finalSpd3": 96, "finalSpd4": 93,
+            "acl": 92, "aclDistSurfMatch": true, "regSpdAvg": 94,
+            "prevRr1": 94, "prevRr2": 93, "prevRr3": 92,
+            "daysSinceLr": 28, "layoffCount": 0,
+            "speedLastRace": 95, "backSpeed": 96, "currentClass": 92, "avgClassLast3": 91,
+            "earlyPaceLastRace": 82, "latePaceLastRace": 96
+          }
+        },
+        {
+          "programNumber": "1",
+          "horseName": "Midpack Mike",
+          "sireName": "Hard Spun",
+          "damName": "Average Jane",
+          "damSireName": "Smart Strike",
+          "mlOdds": 6.0,
+          "header": {
+            "primePower": 145.0, "primePowerRank": 3, "runStyle": "P", "earlySpeedPoints": 4,
+            "pedFast": 1.02, "pedOff": 0.93, "pedDistance": 1.0, "pedTurf": 1.05,
+            "medLasix": "L", "medBute": true, "blinkers": "NONE", "weightCarried": 120, "denotation": "NONE",
+            "dpi": 2.1, "spi": 1.4, "sireAwd": 7.6, "damSireAwd": 7.9,
+            "sireMudPct": 14, "sireTurfPct": 15, "sireFtsPct": 13,
+            "ownerName": "Calumet Farm",
+            "lifeRecord": { "starts": 20, "first": 3, "second": 4, "third": 5, "earnings": 210000, "bestSpd": 93 }
+          },
+          "jockey": {
+            "meetMounts": 60, "meetWinPct": 14, "yearWinPct": 13, "yearItmPct": 38, "yearRoi": -0.2,
+            "trnL60Mounts": 10, "trnL60WinPct": 10, "trnL60ItmPct": 30, "trnL60Roi": -0.3
+          },
+          "trainer": {
+            "meetStarts": 40, "meetWinPct": 12, "yearWinPct": 13, "yearItmPct": 38, "yearRoi": -0.15,
+            "angles3yr": {}
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-05", "track": "BEL", "raceNum": 6, "surface": "TURF", "distanceFurlongs": 8.5,
+              "condition": "fm", "raceType": "ALW", "rr": 88, "cr": 84, "e1": 88, "e2": 86, "lp": 86, "spd": 90,
+              "post": 5, "stPos": 4, "stLengths": 3.0, "c1Pos": 4, "c1Lengths": 2.5, "c2Pos": 4, "c2Lengths": 2.0,
+              "strPos": 4, "strLengths": 2.5, "finPos": 4, "finLengths": 3.0, "jockey": "Carmouche K", "weight": 120,
+              "med": "L", "comment": "evenly", "fieldSize": 10, "raceShape1c": 0, "raceShape2c": 0, "top3": []
+            }
+          ],
+          "workouts": [
+            { "date": "2026-05-30", "bullet": false, "track": "SAR", "turf": false, "distanceFurlongs": 4, "condition": "ft", "time": 49.6, "style": "B", "fromGate": false, "rankPosition": 22, "rankTotal": 35 }
+          ],
+          "summary": {
+            "avgDsE1": 88, "avgDsE2": 86, "avgDsLate": 86, "avgDsSpd": 90, "avgDsSampleFlag": "NONE",
+            "avgRaceRtng": 88, "bestPaceE1": 88, "bestPaceE2": 86, "bestPaceLp": 86,
+            "finalSpd1": 90, "finalSpd2": 89, "finalSpd3": 90, "finalSpd4": 88,
+            "acl": 84, "aclDistSurfMatch": true, "regSpdAvg": 89,
+            "prevRr1": 88, "prevRr2": 87, "prevRr3": 88,
+            "daysSinceLr": 33, "layoffCount": 0,
+            "speedLastRace": 90, "backSpeed": 90, "currentClass": 84, "avgClassLast3": 84,
+            "earlyPaceLastRace": 88, "latePaceLastRace": 86
+          }
+        }
+      ]
+    },
+    {
+      "raceNumber": 3,
+      "conditionsRaw": "CLAIMING $25000 3YO+ 6.5F DIRT",
+      "surface": "DIRT",
+      "distanceFurlongs": 6.5,
+      "pars": { "parE1": 86, "parE2Late": 82, "parSpd": 85 },
+      "bias": [
+        {
+          "scope": "MEET", "surface": "DIRT", "distance": "SPRINT", "numRaces": 42,
+          "wirePct": 31, "speedBiasPct": 38,
+          "ivE": 1.84, "ivEp": 1.31, "ivP": 0.74, "ivS": 0.52,
+          "pctE": 41, "pctEp": 28, "pctP": 19, "pctS": 12,
+          "dominantStyle": "E", "favorableStyles": ["E", "E/P"],
+          "ivRail": 1.42, "iv1_3": 1.18, "iv4_7": 0.88, "iv8plus": 0.61,
+          "favorablePosts": ["RAIL", "1_3"]
+        },
+        {
+          "scope": "WEEK", "surface": "DIRT", "distance": "SPRINT", "numRaces": 11,
+          "wirePct": 36, "speedBiasPct": 44, "dominantStyle": "E", "favorableStyles": ["E"],
+          "favorablePosts": ["RAIL"]
+        }
+      ],
+      "runners": [
+        {
+          "programNumber": "2",
+          "horseName": "Tactical Error",
+          "sireName": "Speightstown",
+          "damName": "Wrong Turn",
+          "damSireName": "Unbridled's Song",
+          "mlOdds": 2.0,
+          "header": {
+            "primePower": 140.0, "primePowerRank": 1, "runStyle": "P", "earlySpeedPoints": 3,
+            "pedFast": 1.05, "pedOff": 0.92, "pedDistance": 0.99, "pedTurf": 0.85,
+            "medLasix": "L", "medBute": true, "blinkers": "NONE", "weightCarried": 122, "denotation": "NONE",
+            "claimPrice": 25000, "dpi": 2.5, "spi": 1.7, "sireAwd": 6.4, "damSireAwd": 7.1,
+            "sireMudPct": 13, "sireTurfPct": 10, "sireFtsPct": 17,
+            "ownerName": "Some Owner LLC",
+            "lifeRecord": { "starts": 24, "first": 3, "second": 5, "third": 4, "earnings": 180000, "bestSpd": 88 }
+          },
+          "jockey": {
+            "meetMounts": 70, "meetWinPct": 15, "yearWinPct": 14, "yearItmPct": 40, "yearRoi": -0.16,
+            "trnL60Mounts": 14, "trnL60WinPct": 11, "trnL60ItmPct": 33, "trnL60Roi": -0.25
+          },
+          "trainer": {
+            "meetStarts": 45, "meetWinPct": 14, "yearWinPct": 15, "yearItmPct": 41, "yearRoi": -0.08,
+            "angles3yr": {}
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-14", "track": "SAR", "raceNum": 4, "surface": "DIRT", "distanceFurlongs": 6.5,
+              "condition": "ft", "raceType": "CLM", "rr": 80, "cr": 70, "e1": 84, "e2": 80, "lp": 80, "spd": 84,
+              "post": 3, "stPos": 3, "stLengths": 2.0, "c1Pos": 3, "c1Lengths": 2.0, "c2Pos": 3, "c2Lengths": 2.5,
+              "strPos": 3, "strLengths": 2.0, "finPos": 3, "finLengths": 2.5, "jockey": "Lezcano J", "weight": 122,
+              "med": "L", "comment": "no rally", "fieldSize": 8, "raceShape1c": 0, "raceShape2c": 0, "top3": []
+            }
+          ],
+          "workouts": [
+            { "date": "2026-05-31", "bullet": false, "track": "SAR", "distanceFurlongs": 4, "condition": "ft", "time": 48.9, "style": "B", "fromGate": false, "rankPosition": 16, "rankTotal": 40 }
+          ],
+          "summary": {
+            "avgDsE1": 84, "avgDsE2": 80, "avgDsLate": 80, "avgDsSpd": 84, "avgDsSampleFlag": "NONE",
+            "avgRaceRtng": 80, "bestPaceE1": 84, "bestPaceE2": 80, "bestPaceLp": 80,
+            "finalSpd1": 84, "finalSpd2": 83, "finalSpd3": 84, "finalSpd4": 82,
+            "acl": 78, "aclDistSurfMatch": true, "regSpdAvg": 83,
+            "prevRr1": 80, "prevRr2": 79, "prevRr3": 80, "daysSinceLr": 24, "layoffCount": 0,
+            "speedLastRace": 84, "backSpeed": 84, "currentClass": 70, "avgClassLast3": 70,
+            "earlyPaceLastRace": 84, "latePaceLastRace": 80
+          }
+        },
+        {
+          "programNumber": "1",
+          "horseName": "Rail Rocket",
+          "sireName": "Mitole",
+          "damName": "Fast Lane",
+          "damSireName": "Bernardini",
+          "mlOdds": 5.0,
+          "header": {
+            "primePower": 137.0, "primePowerRank": 3, "runStyle": "E", "earlySpeedPoints": 8,
+            "pedFast": 1.15, "pedOff": 1.02, "pedDistance": 0.96, "pedTurf": 0.82,
+            "medLasix": "L", "medBute": true, "blinkers": "ON", "weightCarried": 120, "denotation": "NONE",
+            "claimPrice": 25000, "dpi": 3.0, "spi": 2.3, "sireAwd": 6.0, "damSireAwd": 7.5,
+            "sireMudPct": 18, "sireMudStarts": 90, "sireTurfPct": 8, "sireFtsPct": 21,
+            "ownerName": "Speed Merchants",
+            "lifeRecord": { "starts": 16, "first": 4, "second": 2, "third": 3, "earnings": 160000, "bestSpd": 90 }
+          },
+          "jockey": {
+            "meetMounts": 88, "meetWinPct": 21, "yearWinPct": 22, "yearItmPct": 53, "yearRoi": 0.14,
+            "runStyleMounts": 200, "runStyleWinPct": 25, "runStyleItmPct": 56, "runStyleRoi": 0.2,
+            "trnL60Mounts": 22, "trnL60WinPct": 27, "trnL60ItmPct": 57, "trnL60Roi": 0.38
+          },
+          "trainer": {
+            "meetStarts": 50, "meetWinPct": 24, "yearWinPct": 23, "yearItmPct": 54, "yearRoi": 0.18,
+            "angles3yr": { "blinkers_on": { "starts": 80, "winPct": 30, "itmPct": 60, "roi": 0.5 }, "rail": { "starts": 60, "winPct": 28, "itmPct": 58, "roi": 0.4 } }
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-13", "track": "SAR", "raceNum": 2, "surface": "DIRT", "distanceFurlongs": 6.5,
+              "condition": "ft", "raceType": "CLM", "rr": 82, "cr": 76, "e1": 92, "e2": 86, "lp": 78, "spd": 88,
+              "post": 1, "stPos": 1, "stLengths": -2.0, "c1Pos": 1, "c1Lengths": -2.5, "c2Pos": 1, "c2Lengths": -2.0,
+              "strPos": 1, "strLengths": -1.5, "finPos": 1, "finLengths": -1.0, "jockey": "Alvarado J", "weight": 120,
+              "med": "L", "comment": "wire to wire", "fieldSize": 9, "raceShape1c": 2, "raceShape2c": 2,
+              "top3": [{ "name": "Rail Rocket", "margin": -1.0, "bold": true, "italic": false }]
+            }
+          ],
+          "workouts": [
+            { "date": "2026-06-02", "bullet": true, "track": "SAR", "distanceFurlongs": 4, "condition": "ft", "time": 47.0, "style": "B", "fromGate": true, "rankPosition": 1, "rankTotal": 40 }
+          ],
+          "summary": {
+            "avgDsE1": 92, "avgDsE2": 86, "avgDsLate": 78, "avgDsSpd": 88, "avgDsSampleFlag": "ASTERISK",
+            "avgRaceRtng": 82, "bestPaceE1": 92, "bestPaceE2": 86, "bestPaceLp": 78,
+            "finalSpd1": 88, "finalSpd2": 87, "finalSpd3": 88, "finalSpd4": 86,
+            "acl": 80, "aclDistSurfMatch": true, "regSpdAvg": 87,
+            "prevRr1": 82, "prevRr2": 81, "prevRr3": 82, "daysSinceLr": 25, "layoffCount": 0,
+            "speedLastRace": 88, "backSpeed": 88, "currentClass": 76, "avgClassLast3": 75,
+            "earlyPaceLastRace": 92, "latePaceLastRace": 78
+          }
+        },
+        {
+          "programNumber": "5",
+          "horseName": "Late Bloomer",
+          "sireName": "Quality Road",
+          "damName": "Slow Start",
+          "damSireName": "Giant's Causeway",
+          "mlOdds": 7.0,
+          "header": {
+            "primePower": 138.0, "primePowerRank": 2, "runStyle": "S", "earlySpeedPoints": 1,
+            "pedFast": 0.97, "pedOff": 0.9, "pedDistance": 1.08, "pedTurf": 0.95,
+            "medLasix": "L", "medBute": true, "blinkers": "NONE", "weightCarried": 120, "denotation": "NONE",
+            "claimPrice": 25000, "dpi": 1.7, "spi": 1.1, "sireAwd": 7.8, "damSireAwd": 8.4,
+            "sireMudPct": 15, "sireTurfPct": 14, "sireFtsPct": 12,
+            "ownerName": "Patient Capital",
+            "lifeRecord": { "starts": 22, "first": 3, "second": 3, "third": 4, "earnings": 150000, "bestSpd": 89 }
+          },
+          "jockey": {
+            "meetMounts": 55, "meetWinPct": 12, "yearWinPct": 13, "yearItmPct": 37, "yearRoi": -0.22,
+            "trnL60Mounts": 9, "trnL60WinPct": 9, "trnL60ItmPct": 28, "trnL60Roi": -0.35
+          },
+          "trainer": {
+            "meetStarts": 35, "meetWinPct": 11, "yearWinPct": 12, "yearItmPct": 36, "yearRoi": -0.18,
+            "angles3yr": {}
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-16", "track": "SAR", "raceNum": 6, "surface": "DIRT", "distanceFurlongs": 6.5,
+              "condition": "ft", "raceType": "CLM", "rr": 78, "cr": 72, "e1": 72, "e2": 78, "lp": 88, "spd": 86,
+              "post": 7, "stPos": 8, "stLengths": 7.0, "c1Pos": 8, "c1Lengths": 6.0, "c2Pos": 6, "c2Lengths": 4.0,
+              "strPos": 3, "strLengths": 1.5, "finPos": 2, "finLengths": 0.5, "jockey": "Gaffalione T", "weight": 120,
+              "med": "L", "comment": "late surge, just missed", "fieldSize": 9, "raceShape1c": -2, "raceShape2c": -1,
+              "top3": [{ "name": "Wire Job", "margin": 0.5, "bold": false, "italic": false }]
+            }
+          ],
+          "workouts": [
+            { "date": "2026-05-30", "bullet": false, "track": "SAR", "distanceFurlongs": 5, "condition": "ft", "time": 60.2, "style": "B", "fromGate": false, "rankPosition": 8, "rankTotal": 25 }
+          ],
+          "summary": {
+            "avgDsE1": 72, "avgDsE2": 78, "avgDsLate": 88, "avgDsSpd": 86, "avgDsSampleFlag": "NONE",
+            "avgRaceRtng": 78, "bestPaceE1": 72, "bestPaceE2": 78, "bestPaceLp": 88,
+            "finalSpd1": 86, "finalSpd2": 85, "finalSpd3": 86, "finalSpd4": 84,
+            "acl": 76, "aclDistSurfMatch": true, "regSpdAvg": 85,
+            "prevRr1": 78, "prevRr2": 77, "prevRr3": 78, "daysSinceLr": 22, "layoffCount": 0,
+            "speedLastRace": 86, "backSpeed": 86, "currentClass": 72, "avgClassLast3": 72,
+            "earlyPaceLastRace": 72, "latePaceLastRace": 88
+          }
+        }
+      ]
+    },
+    {
+      "raceNumber": 4,
+      "conditionsRaw": "STAKES G3 4YO+ 7F DIRT",
+      "surface": "DIRT",
+      "distanceFurlongs": 7,
+      "pars": { "parE1": 98, "parE2Late": 96, "parSpd": 100 },
+      "bias": [
+        {
+          "scope": "MEET", "surface": "DIRT", "distance": "SPRINT", "numRaces": 42,
+          "wirePct": 31, "speedBiasPct": 38, "ivE": 1.84, "ivEp": 1.31, "ivP": 0.74, "ivS": 0.52,
+          "dominantStyle": "E", "favorableStyles": ["E", "E/P"], "favorablePosts": ["RAIL", "1_3"]
+        },
+        { "scope": "WEEK", "surface": "DIRT", "distance": "SPRINT", "numRaces": 11, "speedBiasPct": 44, "dominantStyle": "E", "favorableStyles": ["E"] }
+      ],
+      "runners": [
+        {
+          "programNumber": "4",
+          "horseName": "Champion's Pace",
+          "sireName": "Curlin",
+          "damName": "Royal Speed",
+          "damSireName": "A.P. Indy",
+          "mlOdds": 1.8,
+          "header": {
+            "primePower": 165.0, "primePowerRank": 1, "runStyle": "E/P", "earlySpeedPoints": 6,
+            "pedFast": 1.12, "pedOff": 1.0, "pedDistance": 1.05, "pedTurf": 0.9,
+            "medLasix": "L", "medBute": true, "blinkers": "NONE", "weightCarried": 124, "denotation": "NONE",
+            "dpi": 2.8, "spi": 2.0, "sireAwd": 7.2, "damSireAwd": 8.0,
+            "sireMudPct": 16, "sireTurfPct": 12, "sireFtsPct": 15,
+            "ownerName": "Godolphin",
+            "lifeRecord": { "starts": 12, "first": 7, "second": 3, "third": 1, "earnings": 850000, "bestSpd": 105 }
+          },
+          "jockey": {
+            "meetMounts": 90, "meetWinPct": 24, "yearWinPct": 25, "yearItmPct": 58, "yearRoi": 0.2,
+            "trnL60Mounts": 30, "trnL60WinPct": 30, "trnL60ItmPct": 60, "trnL60Roi": 0.45
+          },
+          "trainer": {
+            "meetStarts": 60, "meetWinPct": 26, "yearWinPct": 25, "yearItmPct": 58, "yearRoi": 0.24,
+            "angles3yr": { "stakes": { "starts": 120, "winPct": 30, "itmPct": 62, "roi": 0.3 } }
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-09", "track": "BEL", "raceNum": 9, "surface": "DIRT", "distanceFurlongs": 7,
+              "condition": "ft", "raceType": "G2", "rr": 104, "cr": 102, "e1": 100, "e2": 100, "lp": 96, "spd": 104,
+              "post": 2, "stPos": 2, "stLengths": 0.5, "c1Pos": 1, "c1Lengths": -0.5, "c2Pos": 1, "c2Lengths": -1.5,
+              "strPos": 1, "strLengths": -2.0, "finPos": 1, "finLengths": -2.5, "jockey": "Ortiz I", "weight": 124,
+              "med": "L", "comment": "drew off impressively", "fieldSize": 8, "raceShape1c": 1, "raceShape2c": 1,
+              "top3": [{ "name": "Champion's Pace", "margin": -2.5, "bold": true, "italic": false }]
+            }
+          ],
+          "workouts": [
+            { "date": "2026-06-02", "bullet": true, "track": "SAR", "distanceFurlongs": 5, "condition": "ft", "time": 58.8, "style": "B", "fromGate": false, "rankPosition": 1, "rankTotal": 22 }
+          ],
+          "summary": {
+            "avgDsE1": 100, "avgDsE2": 100, "avgDsLate": 96, "avgDsSpd": 104, "avgDsSampleFlag": "ASTERISK",
+            "avgRaceRtng": 104, "bestPaceE1": 100, "bestPaceE2": 100, "bestPaceLp": 96,
+            "finalSpd1": 104, "finalSpd2": 103, "finalSpd3": 105, "finalSpd4": 102,
+            "acl": 102, "aclDistSurfMatch": true, "regSpdAvg": 103,
+            "prevRr1": 104, "prevRr2": 103, "prevRr3": 102, "daysSinceLr": 29, "layoffCount": 0,
+            "speedLastRace": 104, "backSpeed": 105, "currentClass": 102, "avgClassLast3": 101,
+            "earlyPaceLastRace": 100, "latePaceLastRace": 96
+          }
+        },
+        {
+          "programNumber": "2",
+          "horseName": "Stalking Horse",
+          "sireName": "Tapit",
+          "damName": "Shadow Box",
+          "damSireName": "Distorted Humor",
+          "mlOdds": 4.0,
+          "header": {
+            "primePower": 158.0, "primePowerRank": 2, "runStyle": "P", "earlySpeedPoints": 3,
+            "pedFast": 1.04, "pedOff": 0.95, "pedDistance": 1.02, "pedTurf": 0.92,
+            "medLasix": "L", "medBute": true, "blinkers": "NONE", "weightCarried": 120, "denotation": "NONE",
+            "dpi": 2.2, "spi": 1.5, "sireAwd": 7.8, "damSireAwd": 7.4,
+            "sireMudPct": 15, "sireTurfPct": 13, "sireFtsPct": 14,
+            "ownerName": "WinStar Farm",
+            "lifeRecord": { "starts": 15, "first": 4, "second": 4, "third": 3, "earnings": 420000, "bestSpd": 100 }
+          },
+          "jockey": {
+            "meetMounts": 80, "meetWinPct": 19, "yearWinPct": 20, "yearItmPct": 50, "yearRoi": 0.04,
+            "trnL60Mounts": 18, "trnL60WinPct": 17, "trnL60ItmPct": 46, "trnL60Roi": -0.05
+          },
+          "trainer": {
+            "meetStarts": 48, "meetWinPct": 18, "yearWinPct": 19, "yearItmPct": 48, "yearRoi": 0.0,
+            "angles3yr": {}
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-11", "track": "BEL", "raceNum": 8, "surface": "DIRT", "distanceFurlongs": 7,
+              "condition": "ft", "raceType": "G3", "rr": 100, "cr": 96, "e1": 90, "e2": 92, "lp": 92, "spd": 98,
+              "post": 4, "stPos": 4, "stLengths": 3.0, "c1Pos": 3, "c1Lengths": 2.5, "c2Pos": 3, "c2Lengths": 2.0,
+              "strPos": 2, "strLengths": 1.0, "finPos": 2, "finLengths": 1.5, "jockey": "Saez L", "weight": 120,
+              "med": "L", "comment": "second best", "fieldSize": 7, "raceShape1c": 0, "raceShape2c": 0, "top3": []
+            }
+          ],
+          "workouts": [
+            { "date": "2026-06-01", "bullet": false, "track": "SAR", "distanceFurlongs": 4, "condition": "ft", "time": 48.4, "style": "B", "fromGate": false, "rankPosition": 6, "rankTotal": 30 }
+          ],
+          "summary": {
+            "avgDsE1": 90, "avgDsE2": 92, "avgDsLate": 92, "avgDsSpd": 98, "avgDsSampleFlag": "ASTERISK",
+            "avgRaceRtng": 100, "bestPaceE1": 90, "bestPaceE2": 92, "bestPaceLp": 92,
+            "finalSpd1": 98, "finalSpd2": 97, "finalSpd3": 98, "finalSpd4": 96,
+            "acl": 96, "aclDistSurfMatch": true, "regSpdAvg": 97,
+            "prevRr1": 100, "prevRr2": 99, "prevRr3": 98, "daysSinceLr": 27, "layoffCount": 0,
+            "speedLastRace": 98, "backSpeed": 98, "currentClass": 96, "avgClassLast3": 96,
+            "earlyPaceLastRace": 90, "latePaceLastRace": 92
+          }
+        },
+        {
+          "programNumber": "6",
+          "horseName": "Speed Trap",
+          "sireName": "Mitole",
+          "damName": "Quick Exit",
+          "damSireName": "Speightstown",
+          "mlOdds": 9.0,
+          "header": {
+            "primePower": 150.0, "primePowerRank": 3, "runStyle": "E", "earlySpeedPoints": 8,
+            "pedFast": 1.16, "pedOff": 1.04, "pedDistance": 0.9, "pedTurf": 0.8,
+            "medLasix": "L", "medBute": true, "blinkers": "NONE", "weightCarried": 120, "denotation": "NONE",
+            "dpi": 3.2, "spi": 2.5, "sireAwd": 5.9, "damSireAwd": 6.4,
+            "sireMudPct": 18, "sireTurfPct": 8, "sireFtsPct": 22,
+            "ownerName": "Quick Silver Stable",
+            "lifeRecord": { "starts": 14, "first": 5, "second": 2, "third": 1, "earnings": 300000, "bestSpd": 99 }
+          },
+          "jockey": {
+            "meetMounts": 70, "meetWinPct": 16, "yearWinPct": 17, "yearItmPct": 44, "yearRoi": -0.1,
+            "trnL60Mounts": 12, "trnL60WinPct": 14, "trnL60ItmPct": 40, "trnL60Roi": -0.12
+          },
+          "trainer": {
+            "meetStarts": 38, "meetWinPct": 15, "yearWinPct": 16, "yearItmPct": 43, "yearRoi": -0.06,
+            "angles3yr": { "sprint": { "starts": 90, "winPct": 20, "itmPct": 48, "roi": 0.1 } }
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-12", "track": "BEL", "raceNum": 7, "surface": "DIRT", "distanceFurlongs": 6,
+              "condition": "ft", "raceType": "ALW", "rr": 96, "cr": 94, "e1": 100, "e2": 94, "lp": 84, "spd": 96,
+              "post": 1, "stPos": 1, "stLengths": -3.0, "c1Pos": 1, "c1Lengths": -3.5, "c2Pos": 1, "c2Lengths": -2.5,
+              "strPos": 1, "strLengths": -1.5, "finPos": 1, "finLengths": -1.0, "jockey": "Cancel E", "weight": 118,
+              "med": "L", "comment": "gate to wire", "fieldSize": 6, "raceShape1c": 3, "raceShape2c": 2,
+              "top3": [{ "name": "Speed Trap", "margin": -1.0, "bold": true, "italic": false }]
+            }
+          ],
+          "workouts": [
+            { "date": "2026-06-02", "bullet": false, "track": "SAR", "distanceFurlongs": 4, "condition": "ft", "time": 48.0, "style": "B", "fromGate": true, "rankPosition": 3, "rankTotal": 30 }
+          ],
+          "summary": {
+            "avgDsE1": 100, "avgDsE2": 94, "avgDsLate": 84, "avgDsSpd": 96, "avgDsSampleFlag": "NONE",
+            "avgRaceRtng": 96, "bestPaceE1": 100, "bestPaceE2": 94, "bestPaceLp": 84,
+            "finalSpd1": 96, "finalSpd2": 95, "finalSpd3": 94, "finalSpd4": 92,
+            "acl": 92, "aclDistSurfMatch": false, "regSpdAvg": 95,
+            "prevRr1": 96, "prevRr2": 95, "prevRr3": 94, "daysSinceLr": 26, "layoffCount": 0,
+            "speedLastRace": 96, "backSpeed": 96, "currentClass": 94, "avgClassLast3": 93,
+            "earlyPaceLastRace": 100, "latePaceLastRace": 84
+          }
+        }
+      ]
+    },
+    {
+      "raceNumber": 5,
+      "conditionsRaw": "MAIDEN CLAIMING $40000 2YO 5.5F DIRT",
+      "surface": "DIRT",
+      "distanceFurlongs": 5.5,
+      "pars": { "parE1": 78, "parE2Late": 72, "parSpd": 74 },
+      "bias": [
+        { "scope": "MEET", "surface": "DIRT", "distance": "SPRINT", "numRaces": 42, "speedBiasPct": 38, "dominantStyle": "E", "favorableStyles": ["E", "E/P"], "favorablePosts": ["RAIL", "1_3"], "ivE": 1.84, "ivEp": 1.31, "ivP": 0.74, "ivS": 0.52 },
+        { "scope": "WEEK", "surface": "DIRT", "distance": "SPRINT", "numRaces": 11, "speedBiasPct": 44, "dominantStyle": "E", "favorableStyles": ["E"] }
+      ],
+      "runners": [
+        {
+          "programNumber": "3",
+          "horseName": "First Timer",
+          "sireName": "Nyquist",
+          "damName": "Debut Dream",
+          "damSireName": "Tapit",
+          "mlOdds": 3.0,
+          "header": {
+            "primePower": 120.0, "primePowerRank": 2, "runStyle": "NA", "earlySpeedPoints": null,
+            "pedFast": 1.08, "pedOff": 0.95, "pedDistance": 0.92, "pedTurf": 0.88,
+            "medLasix": "FIRST_L", "medBute": true, "blinkers": "ON", "weightCarried": 118, "denotation": "NONE",
+            "dpi": 2.7, "spi": 1.9, "sireAwd": 6.2, "damSireAwd": 7.0,
+            "sireMudPct": 17, "sireTurfPct": 11, "sireFtsPct": 24, "sireFirstTurfPct": 8,
+            "ownerName": "New Connections",
+            "lifeRecord": { "starts": 0, "first": 0, "second": 0, "third": 0, "earnings": 0, "bestSpd": null }
+          },
+          "jockey": {
+            "meetMounts": 80, "meetWinPct": 18, "yearWinPct": 19, "yearItmPct": 47, "yearRoi": 0.0,
+            "trnL60Mounts": 16, "trnL60WinPct": 16, "trnL60ItmPct": 42, "trnL60Roi": -0.05
+          },
+          "trainer": {
+            "meetStarts": 40, "meetWinPct": 16, "yearWinPct": 17, "yearItmPct": 44, "yearRoi": -0.02,
+            "angles3yr": { "first_lasix": { "starts": 110, "winPct": 22, "itmPct": 50, "roi": 0.18 }, "debut": { "starts": 150, "winPct": 20, "itmPct": 46, "roi": 0.1 } }
+          },
+          "pastLines": [],
+          "workouts": [
+            { "date": "2026-06-01", "bullet": true, "track": "SAR", "distanceFurlongs": 4, "condition": "ft", "time": 47.4, "style": "B", "fromGate": true, "rankPosition": 1, "rankTotal": 38 },
+            { "date": "2026-05-24", "bullet": false, "track": "SAR", "distanceFurlongs": 4, "condition": "ft", "time": 48.6, "style": "B", "fromGate": false, "rankPosition": 5, "rankTotal": 30 },
+            { "date": "2026-05-17", "bullet": false, "track": "SAR", "distanceFurlongs": 3, "condition": "ft", "time": 36.2, "style": "B", "fromGate": false, "rankPosition": 8, "rankTotal": 25 }
+          ],
+          "summary": {
+            "avgDsE1": null, "avgDsE2": null, "avgDsLate": null, "avgDsSpd": null, "avgDsSampleFlag": null,
+            "avgRaceRtng": null, "bestPaceE1": null, "bestPaceE2": null, "bestPaceLp": null,
+            "finalSpd1": null, "finalSpd2": null, "finalSpd3": null, "finalSpd4": null,
+            "acl": null, "aclDistSurfMatch": false, "regSpdAvg": null,
+            "daysSinceLr": null, "layoffCount": null,
+            "speedLastRace": null, "backSpeed": null, "currentClass": null, "avgClassLast3": null,
+            "earlyPaceLastRace": null, "latePaceLastRace": null
+          }
+        },
+        {
+          "programNumber": "1",
+          "horseName": "Second Chance",
+          "sireName": "Maximus Mischief",
+          "damName": "Try Again",
+          "damSireName": "Bernardini",
+          "mlOdds": 4.0,
+          "header": {
+            "primePower": 118.0, "primePowerRank": 3, "runStyle": "E", "earlySpeedPoints": 6,
+            "pedFast": 1.04, "pedOff": 0.96, "pedDistance": 0.94, "pedTurf": 0.86,
+            "medLasix": "L", "medBute": true, "blinkers": "NONE", "weightCarried": 118, "denotation": "NONE",
+            "dpi": 2.5, "spi": 1.7, "sireAwd": 5.8, "damSireAwd": 7.2,
+            "sireMudPct": 14, "sireTurfPct": 9, "sireFtsPct": 19,
+            "ownerName": "Second Wind Racing",
+            "lifeRecord": { "starts": 2, "first": 0, "second": 1, "third": 0, "earnings": 8000, "bestSpd": 72 }
+          },
+          "jockey": {
+            "meetMounts": 60, "meetWinPct": 13, "yearWinPct": 14, "yearItmPct": 38, "yearRoi": -0.18,
+            "trnL60Mounts": 8, "trnL60WinPct": 10, "trnL60ItmPct": 30, "trnL60Roi": -0.3
+          },
+          "trainer": {
+            "meetStarts": 30, "meetWinPct": 12, "yearWinPct": 13, "yearItmPct": 37, "yearRoi": -0.15,
+            "angles3yr": {}
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-18", "track": "SAR", "raceNum": 1, "surface": "DIRT", "distanceFurlongs": 5.5,
+              "condition": "ft", "raceType": "MCL", "rr": 56, "cr": 48, "e1": 76, "e2": 70, "lp": 68, "spd": 72,
+              "post": 2, "stPos": 2, "stLengths": 1.0, "c1Pos": 2, "c1Lengths": 1.5, "c2Pos": 3, "c2Lengths": 2.5,
+              "strPos": 3, "strLengths": 2.0, "finPos": 2, "finLengths": 1.5, "jockey": "Reyes L", "weight": 118,
+              "med": "L", "comment": "pressed pace, weakened", "fieldSize": 7, "raceShape1c": 1, "raceShape2c": 1, "top3": []
+            }
+          ],
+          "workouts": [
+            { "date": "2026-05-30", "bullet": false, "track": "SAR", "distanceFurlongs": 4, "condition": "ft", "time": 49.2, "style": "B", "fromGate": false, "rankPosition": 20, "rankTotal": 38 }
+          ],
+          "summary": {
+            "avgDsE1": 76, "avgDsE2": 70, "avgDsLate": 68, "avgDsSpd": 72, "avgDsSampleFlag": "NONE",
+            "avgRaceRtng": 56, "bestPaceE1": 76, "bestPaceE2": 70, "bestPaceLp": 68,
+            "finalSpd1": 72, "finalSpd2": null, "finalSpd3": null, "finalSpd4": null,
+            "acl": 54, "aclDistSurfMatch": true, "regSpdAvg": 72,
+            "prevRr1": 56, "daysSinceLr": 20, "layoffCount": 0,
+            "speedLastRace": 72, "backSpeed": 72, "currentClass": 48, "avgClassLast3": 48,
+            "earlyPaceLastRace": 76, "latePaceLastRace": 68
+          }
+        }
+      ]
+    },
+    {
+      "raceNumber": 6,
+      "conditionsRaw": "ALLOWANCE 3YO+ F&M 1 1/8M DIRT",
+      "surface": "DIRT",
+      "distanceFurlongs": 9,
+      "pars": { "parE1": 92, "parE2Late": 94, "parSpd": 96 },
+      "bias": [
+        {
+          "scope": "MEET", "surface": "DIRT", "distance": "ROUTE", "numRaces": 28,
+          "wirePct": 24, "speedBiasPct": 26,
+          "ivE": 1.1, "ivEp": 1.2, "ivP": 1.05, "ivS": 0.82,
+          "pctE": 24, "pctEp": 30, "pctP": 26, "pctS": 20,
+          "dominantStyle": "E/P", "favorableStyles": ["E", "E/P"],
+          "ivRail": 1.0, "iv1_3": 1.08, "iv4_7": 0.96, "iv8plus": 0.85,
+          "favorablePosts": ["1_3"]
+        },
+        { "scope": "WEEK", "surface": "DIRT", "distance": "ROUTE", "numRaces": 7, "speedBiasPct": 28, "dominantStyle": "E/P", "favorableStyles": ["E/P"], "favorablePosts": ["1_3"] }
+      ],
+      "runners": [
+        {
+          "programNumber": "5",
+          "horseName": "Front Runner Fay",
+          "sireName": "Into Mischief",
+          "damName": "Pacesetter",
+          "damSireName": "Bernardini",
+          "mlOdds": 2.2,
+          "header": {
+            "primePower": 152.0, "primePowerRank": 1, "runStyle": "S", "earlySpeedPoints": 1,
+            "pedFast": 0.98, "pedOff": 0.9, "pedDistance": 1.1, "pedTurf": 0.92,
+            "medLasix": "L", "medBute": true, "blinkers": "NONE", "weightCarried": 122, "denotation": "NONE",
+            "dpi": 1.8, "spi": 1.2, "sireAwd": 7.6, "damSireAwd": 8.1,
+            "sireMudPct": 15, "sireTurfPct": 12, "sireFtsPct": 14,
+            "ownerName": "Eclipse Thoroughbreds",
+            "lifeRecord": { "starts": 10, "first": 3, "second": 2, "third": 2, "earnings": 200000, "bestSpd": 96 }
+          },
+          "jockey": {
+            "meetMounts": 80, "meetWinPct": 18, "yearWinPct": 19, "yearItmPct": 48, "yearRoi": -0.04,
+            "trnL60Mounts": 16, "trnL60WinPct": 14, "trnL60ItmPct": 40, "trnL60Roi": -0.15
+          },
+          "trainer": {
+            "meetStarts": 45, "meetWinPct": 17, "yearWinPct": 18, "yearItmPct": 46, "yearRoi": -0.02,
+            "angles3yr": {}
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-10", "track": "BEL", "raceNum": 8, "surface": "DIRT", "distanceFurlongs": 8.5,
+              "condition": "ft", "raceType": "ALW", "rr": 96, "cr": 90, "e1": 84, "e2": 90, "lp": 94, "spd": 96,
+              "post": 6, "stPos": 7, "stLengths": 6.0, "c1Pos": 7, "c1Lengths": 5.5, "c2Pos": 5, "c2Lengths": 3.0,
+              "strPos": 2, "strLengths": 1.0, "finPos": 2, "finLengths": 1.0, "jockey": "Davis D", "weight": 122,
+              "med": "L", "comment": "closed willingly", "fieldSize": 9, "raceShape1c": -2, "raceShape2c": -1, "top3": []
+            }
+          ],
+          "workouts": [
+            { "date": "2026-06-01", "bullet": false, "track": "SAR", "distanceFurlongs": 5, "condition": "ft", "time": 60.0, "style": "B", "fromGate": false, "rankPosition": 10, "rankTotal": 24 }
+          ],
+          "summary": {
+            "avgDsE1": 84, "avgDsE2": 90, "avgDsLate": 94, "avgDsSpd": 96, "avgDsSampleFlag": "NONE",
+            "avgRaceRtng": 96, "bestPaceE1": 84, "bestPaceE2": 90, "bestPaceLp": 94,
+            "finalSpd1": 96, "finalSpd2": 95, "finalSpd3": 96, "finalSpd4": 94,
+            "acl": 90, "aclDistSurfMatch": false, "regSpdAvg": 95,
+            "prevRr1": 96, "prevRr2": 95, "prevRr3": 94, "daysSinceLr": 28, "layoffCount": 0,
+            "speedLastRace": 96, "backSpeed": 96, "currentClass": 90, "avgClassLast3": 90,
+            "earlyPaceLastRace": 84, "latePaceLastRace": 94
+          }
+        },
+        {
+          "programNumber": "3",
+          "horseName": "Wire Intent",
+          "sireName": "Gun Runner",
+          "damName": "Early Bird",
+          "damSireName": "Speightstown",
+          "mlOdds": 5.0,
+          "header": {
+            "primePower": 146.0, "primePowerRank": 3, "runStyle": "E", "earlySpeedPoints": 7,
+            "pedFast": 1.14, "pedOff": 1.0, "pedDistance": 1.02, "pedTurf": 0.88,
+            "medLasix": "L", "medBute": true, "blinkers": "ON", "weightCarried": 120, "denotation": "NONE",
+            "dpi": 2.9, "spi": 2.2, "sireAwd": 6.6, "damSireAwd": 7.0,
+            "sireMudPct": 19, "sireMudStarts": 150, "sireTurfPct": 9, "sireFtsPct": 20,
+            "ownerName": "Front Office Stable",
+            "lifeRecord": { "starts": 11, "first": 3, "second": 2, "third": 1, "earnings": 180000, "bestSpd": 94 }
+          },
+          "jockey": {
+            "meetMounts": 88, "meetWinPct": 22, "yearWinPct": 23, "yearItmPct": 54, "yearRoi": 0.15,
+            "runStyleMounts": 190, "runStyleWinPct": 26, "runStyleItmPct": 57, "runStyleRoi": 0.22,
+            "trnL60Mounts": 26, "trnL60WinPct": 28, "trnL60ItmPct": 58, "trnL60Roi": 0.4
+          },
+          "trainer": {
+            "meetStarts": 52, "meetWinPct": 25, "yearWinPct": 24, "yearItmPct": 56, "yearRoi": 0.2,
+            "angles3yr": { "blinkers_on": { "starts": 90, "winPct": 29, "itmPct": 59, "roi": 0.46 }, "route": { "starts": 110, "winPct": 24, "itmPct": 55, "roi": 0.22 } }
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-12", "track": "SAR", "raceNum": 7, "surface": "DIRT", "distanceFurlongs": 8.5,
+              "condition": "ft", "raceType": "ALW", "rr": 90, "cr": 84, "e1": 96, "e2": 92, "lp": 86, "spd": 92,
+              "post": 2, "stPos": 1, "stLengths": -1.5, "c1Pos": 1, "c1Lengths": -2.0, "c2Pos": 1, "c2Lengths": -1.5,
+              "strPos": 1, "strLengths": -1.0, "finPos": 1, "finLengths": -0.5, "jockey": "Rosario J", "weight": 120,
+              "med": "L", "comment": "controlled throughout", "fieldSize": 8, "raceShape1c": 2, "raceShape2c": 2,
+              "top3": [{ "name": "Wire Intent", "margin": -0.5, "bold": true, "italic": false }]
+            }
+          ],
+          "workouts": [
+            { "date": "2026-06-02", "bullet": true, "track": "SAR", "distanceFurlongs": 5, "condition": "ft", "time": 59.0, "style": "B", "fromGate": true, "rankPosition": 1, "rankTotal": 24 }
+          ],
+          "summary": {
+            "avgDsE1": 96, "avgDsE2": 92, "avgDsLate": 86, "avgDsSpd": 92, "avgDsSampleFlag": "ASTERISK",
+            "avgRaceRtng": 90, "bestPaceE1": 96, "bestPaceE2": 92, "bestPaceLp": 86,
+            "finalSpd1": 92, "finalSpd2": 91, "finalSpd3": 92, "finalSpd4": 90,
+            "acl": 86, "aclDistSurfMatch": true, "regSpdAvg": 91,
+            "prevRr1": 90, "prevRr2": 89, "prevRr3": 90, "daysSinceLr": 26, "layoffCount": 0,
+            "speedLastRace": 92, "backSpeed": 92, "currentClass": 84, "avgClassLast3": 84,
+            "earlyPaceLastRace": 96, "latePaceLastRace": 86
+          }
+        },
+        {
+          "programNumber": "2",
+          "horseName": "Even Keel",
+          "sireName": "Quality Road",
+          "damName": "Steady Hand",
+          "damSireName": "A.P. Indy",
+          "mlOdds": 6.0,
+          "header": {
+            "primePower": 148.0, "primePowerRank": 2, "runStyle": "P", "earlySpeedPoints": 4,
+            "pedFast": 1.02, "pedOff": 0.94, "pedDistance": 1.04, "pedTurf": 0.9,
+            "medLasix": "L", "medBute": true, "blinkers": "NONE", "weightCarried": 120, "denotation": "NONE",
+            "dpi": 2.1, "spi": 1.4, "sireAwd": 7.4, "damSireAwd": 7.6,
+            "sireMudPct": 14, "sireTurfPct": 13, "sireFtsPct": 13,
+            "ownerName": "Steady Stable",
+            "lifeRecord": { "starts": 13, "first": 2, "second": 4, "third": 3, "earnings": 160000, "bestSpd": 92 }
+          },
+          "jockey": {
+            "meetMounts": 65, "meetWinPct": 15, "yearWinPct": 16, "yearItmPct": 42, "yearRoi": -0.1,
+            "trnL60Mounts": 12, "trnL60WinPct": 13, "trnL60ItmPct": 38, "trnL60Roi": -0.12
+          },
+          "trainer": {
+            "meetStarts": 42, "meetWinPct": 16, "yearWinPct": 17, "yearItmPct": 44, "yearRoi": -0.04,
+            "angles3yr": {}
+          },
+          "pastLines": [
+            {
+              "date": "2026-05-11", "track": "BEL", "raceNum": 6, "surface": "DIRT", "distanceFurlongs": 9,
+              "condition": "ft", "raceType": "ALW", "rr": 92, "cr": 86, "e1": 88, "e2": 90, "lp": 88, "spd": 92,
+              "post": 3, "stPos": 3, "stLengths": 2.5, "c1Pos": 3, "c1Lengths": 2.0, "c2Pos": 3, "c2Lengths": 2.0,
+              "strPos": 3, "strLengths": 2.0, "finPos": 3, "finLengths": 2.5, "jockey": "Franco M", "weight": 120,
+              "med": "L", "comment": "evenly", "fieldSize": 8, "raceShape1c": 0, "raceShape2c": 0, "top3": []
+            }
+          ],
+          "workouts": [
+            { "date": "2026-06-01", "bullet": false, "track": "SAR", "distanceFurlongs": 4, "condition": "ft", "time": 49.0, "style": "B", "fromGate": false, "rankPosition": 14, "rankTotal": 24 }
+          ],
+          "summary": {
+            "avgDsE1": 88, "avgDsE2": 90, "avgDsLate": 88, "avgDsSpd": 92, "avgDsSampleFlag": "ASTERISK",
+            "avgRaceRtng": 92, "bestPaceE1": 88, "bestPaceE2": 90, "bestPaceLp": 88,
+            "finalSpd1": 92, "finalSpd2": 91, "finalSpd3": 92, "finalSpd4": 90,
+            "acl": 86, "aclDistSurfMatch": true, "regSpdAvg": 91,
+            "prevRr1": 92, "prevRr2": 91, "prevRr3": 90, "daysSinceLr": 27, "layoffCount": 0,
+            "speedLastRace": 92, "backSpeed": 92, "currentClass": 86, "avgClassLast3": 86,
+            "earlyPaceLastRace": 88, "latePaceLastRace": 88
+          }
+        }
+      ]
+    }
+  ]
+}
