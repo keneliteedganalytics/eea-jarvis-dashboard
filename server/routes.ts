@@ -6,11 +6,12 @@ import {
   insertCardSchema,
   insertRaceSchema,
   resultSubmitSchema,
+  payoutsSubmitSchema,
   updateRaceTextSchema,
   insertSettingsSchema,
   updatePredictionSchema,
 } from "@shared/schema";
-import type { Card, Settings } from "@shared/schema";
+import type { Card, Settings, Result } from "@shared/schema";
 import { z } from "zod";
 import { backfillNullScoreCards, sweepArchive } from "./services/card-finishing";
 import { getOrFetchBias, fetchBias } from "./services/bias-fetcher";
@@ -21,6 +22,7 @@ import {
   buildCardStats,
   buildLifetimeStats,
   buildTrackRecordSummary,
+  buildLedgerRoi,
   TIMEFRAMES,
   type Timeframe,
 } from "./analytics";
@@ -187,11 +189,37 @@ export async function registerRoutes(
     const race = storage.getRace(raceId);
     if (!race) return res.status(404).json({ error: "Race not found" });
     try {
-      const result = storage.logResult(raceId, parsed.data.finishOrder);
+      const { finishOrder, ...payouts } = parsed.data;
+      // Strip undefined so logResult's ?? null fallbacks apply cleanly.
+      const opts: Partial<Result> = {};
+      for (const [k, v] of Object.entries(payouts)) {
+        if (v !== undefined) (opts as Record<string, number | null>)[k] = v;
+      }
+      const result = storage.logResult(raceId, finishOrder, opts);
       res.status(201).json(result);
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });
     }
+  });
+
+  // Backfill odds + payouts on an ALREADY-graded race (works on any card,
+  // including past ones like Card #4). Updates the result row and re-reconciles
+  // the bet_legs ledger so per-leg payout/hit reflect the entered numbers.
+  app.patch("/api/races/:id/payouts", (req, res) => {
+    const raceId = Number(req.params.id);
+    const parsed = payoutsSubmitSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+    const opts: Partial<Result> = {};
+    for (const [k, v] of Object.entries(parsed.data)) {
+      if (v !== undefined) (opts as Record<string, number | null>)[k] = v as number | null;
+    }
+    const updated = storage.updateResultPayouts(raceId, opts);
+    if (!updated) {
+      return res.status(404).json({ error: "No graded result for this race — grade it first." });
+    }
+    res.json(updated);
   });
 
   // Update editable analysis text on a race.
@@ -469,6 +497,17 @@ export async function registerRoutes(
     const track = typeof req.query.track === "string" ? req.query.track : undefined;
     const date = typeof req.query.date === "string" ? req.query.date : undefined;
     res.json(buildAnalyticsSummary({ scope, track, date }));
+  });
+
+  // Ledger ROI (PR #40): tier / position / tier×position / flag ROI from the
+  // bet_legs ledger. Same scope contract as /api/analytics/summary.
+  app.get("/api/analytics/roi", (req, res) => {
+    const rawScope = String(req.query.scope || "lifetime").toLowerCase();
+    const scope: "today" | "track" | "lifetime" =
+      rawScope === "today" || rawScope === "track" ? (rawScope as "today" | "track") : "lifetime";
+    const track = typeof req.query.track === "string" ? req.query.track : undefined;
+    const date = typeof req.query.date === "string" ? req.query.date : undefined;
+    res.json(buildLedgerRoi({ scope, track, date }));
   });
 
   // Distinct list of tracks with graded race counts, for the Per-Track picker.

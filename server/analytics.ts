@@ -403,6 +403,116 @@ export function buildTrackRecordSummary(timeframe: Timeframe = "30D"): TrackReco
   };
 }
 
+// ── Ledger ROI (PR #40) ───────────────────────────────────────────────────
+// Aggregates the bet_legs ledger by tier, position (leg_type), tier×position,
+// and flag. ROI% = (payout - cost) / cost. Only legs whose race has a known
+// outcome (hit !== null) count toward ROI/hit-rate; ungraded legs are ignored.
+// Scope-aware via the same card filter as buildAnalyticsSummary.
+import type { BetLegRow } from "@shared/schema";
+
+const LEG_POSITIONS = ["WIN", "PLACE", "SHOW", "EXACTA", "TRIFECTA", "SUPERFECTA"] as const;
+const ROI_TIERS = ["SNIPER", "EDGE", "DUAL", "RECON"] as const;
+
+export interface RoiRow {
+  key: string;
+  legs: number; // settled legs (hit !== null)
+  cost: number;
+  payout: number;
+  roi: number | null; // percent, null when cost === 0
+  hitRate: number | null; // percent of settled legs that hit
+}
+
+export interface LedgerRoi {
+  scope: string;
+  track: string | null;
+  date: string | null;
+  byTier: RoiRow[];
+  byPosition: RoiRow[];
+  matrix: { tier: string; position: string; roi: number | null; legs: number }[];
+  byFlag: RoiRow[];
+  overall: RoiRow;
+}
+
+function roiRow(key: string, legs: BetLegRow[]): RoiRow {
+  const settled = legs.filter((l) => l.hit !== null);
+  const cost = settled.reduce((a, l) => a + l.cost, 0);
+  const payout = settled.reduce((a, l) => a + (l.payout ?? 0), 0);
+  const hits = settled.filter((l) => l.hit === true).length;
+  return {
+    key,
+    legs: settled.length,
+    cost: Math.round(cost * 100) / 100,
+    payout: Math.round(payout * 100) / 100,
+    roi: cost > 0 ? Math.round(((payout - cost) / cost) * 1000) / 10 : null,
+    hitRate: settled.length > 0 ? Math.round((hits / settled.length) * 100) : null,
+  };
+}
+
+export function buildLedgerRoi(opts: AnalyticsScope = {}): LedgerRoi {
+  const scope = opts.scope ?? "lifetime";
+  const cards = storage.getCards().filter((c) => {
+    if (scope === "today") return c.date === todayUtc();
+    if (scope === "track") {
+      if (opts.track && c.track !== opts.track) return false;
+      if (opts.date && c.date !== opts.date) return false;
+      return !!opts.track;
+    }
+    return true;
+  });
+  // Touch each card so the ledger is materialized (lazy persistence in storage).
+  const cardIds = new Set<number>();
+  for (const c of cards) {
+    storage.getCardWithRaces(c.id);
+    cardIds.add(c.id);
+  }
+  const legs = storage.getAllBetLegs().filter((l) => cardIds.has(l.cardId));
+
+  const byTier = ROI_TIERS.map((t) => roiRow(t, legs.filter((l) => l.tier === t)));
+  const byPosition = LEG_POSITIONS.map((p) => roiRow(p, legs.filter((l) => l.legType === p)));
+
+  const matrix: LedgerRoi["matrix"] = [];
+  for (const t of ROI_TIERS) {
+    for (const p of LEG_POSITIONS) {
+      const cell = roiRow(`${t}|${p}`, legs.filter((l) => l.tier === t && l.legType === p));
+      matrix.push({ tier: t, position: p, roi: cell.roi, legs: cell.legs });
+    }
+  }
+
+  // Flag ROI: a leg's flags_json carries its race's flags. Normalize each flag
+  // family (strip "on #N" suffix) and bucket every leg under each of its flags.
+  const flagMap = new Map<string, BetLegRow[]>();
+  for (const l of legs) {
+    let flags: string[] = [];
+    try {
+      const j = JSON.parse(l.flagsJson || "[]");
+      if (Array.isArray(j)) flags = j.map(String);
+    } catch {
+      flags = [];
+    }
+    for (const f of flags) {
+      const fam = f.replace(/\s+on\s+#?\w+/i, "").replace(/\s+noted/i, "").trim().toUpperCase();
+      if (!fam) continue;
+      const list = flagMap.get(fam) ?? [];
+      list.push(l);
+      flagMap.set(fam, list);
+    }
+  }
+  const byFlag = Array.from(flagMap.entries())
+    .map(([flag, ls]) => roiRow(flag, ls))
+    .sort((a, b) => (b.cost - a.cost));
+
+  return {
+    scope,
+    track: opts.track ?? null,
+    date: opts.date ?? (scope === "today" ? todayUtc() : null),
+    byTier,
+    byPosition,
+    matrix,
+    byFlag,
+    overall: roiRow("ALL", legs),
+  };
+}
+
 export function buildCardStats(card: CardWithRaces) {
   const graded = card.races.filter((r) => r.result);
   const winsHit = graded.filter((r) => r.result?.winHit).length;

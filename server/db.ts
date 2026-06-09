@@ -85,12 +85,31 @@ CREATE TABLE IF NOT EXISTS results (
   itm_count INTEGER,
   exacta_hit INTEGER, trifecta_hit INTEGER, superfecta_hit INTEGER,
   flags_hit TEXT NOT NULL DEFAULT '[]',
+  win_odds REAL,
   win_payout REAL, place_payout REAL, show_payout REAL,
   exacta_payout REAL, trifecta_payout REAL, superfecta_payout REAL,
   auto_fetched INTEGER DEFAULT 0,
   payouts_raw TEXT,
   logged_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Bet ledger (PR #40). One row per generated leg; payout + hit filled on
+-- payouts entry. Source of truth for tier/position/flag ROI.
+CREATE TABLE IF NOT EXISTS bet_legs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  race_id INTEGER NOT NULL REFERENCES races(id) ON DELETE CASCADE,
+  card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  tier TEXT NOT NULL,
+  leg_type TEXT NOT NULL,
+  structure TEXT NOT NULL,
+  cost REAL NOT NULL,
+  payout REAL,
+  hit INTEGER,
+  flags_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_bet_legs_race ON bet_legs(race_id);
+CREATE INDEX IF NOT EXISTS idx_bet_legs_card ON bet_legs(card_id);
 
 CREATE TABLE IF NOT EXISTS settings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -425,6 +444,17 @@ addCol("tier_share_sniper", "tier_share_sniper REAL NOT NULL DEFAULT 0.35");
 addCol("tier_share_edge", "tier_share_edge REAL NOT NULL DEFAULT 0.20");
 addCol("tier_share_dual", "tier_share_dual REAL NOT NULL DEFAULT 0.12");
 addCol("tier_share_recon", "tier_share_recon REAL NOT NULL DEFAULT 0.08");
+// PR #40: $1k daily risk budget + tier-weighted allocator config.
+addCol("daily_risk_budget", "daily_risk_budget REAL NOT NULL DEFAULT 1000");
+addCol("chaos_demotion_mode", "chaos_demotion_mode TEXT NOT NULL DEFAULT 'floor-recon'");
+addCol(
+  "tier_weights_json",
+  `tier_weights_json TEXT NOT NULL DEFAULT '{"SNIPER":30,"EDGE":18,"DUAL":10,"RECON":4,"PASS":0}'`,
+);
+addCol(
+  "leg_patterns_json",
+  `leg_patterns_json TEXT NOT NULL DEFAULT '{"SNIPER":{"win":50,"place":20,"show":0,"exacta":15,"trifecta":15,"superfecta":0},"EDGE":{"win":45,"place":25,"show":0,"exacta":30,"trifecta":0,"superfecta":0},"DUAL":{"win":35,"place":30,"show":20,"exacta":15,"trifecta":0,"superfecta":0},"RECON":{"win":100,"place":0,"show":0,"exacta":0,"trifecta":0,"superfecta":0},"PASS":{"win":0,"place":0,"show":0,"exacta":0,"trifecta":0,"superfecta":0}}'`,
+);
 
 // Idempotent cards-column migration for the Historical archive. Existing rows
 // inherit status='active'; archived_at is nullable and set by the sweep.
@@ -438,6 +468,10 @@ const addCardCol = (name: string, ddl: string) => {
 };
 addCardCol("status", "status TEXT NOT NULL DEFAULT 'active'");
 addCardCol("archived_at", "archived_at TEXT");
+// PR #40: bet-structure version. Existing cards predate the budgeted allocator,
+// so they default to 1 (legacy flat builder) and keep their bets AS-IS. New
+// cards are inserted explicitly with version 2 (BudgetedBetBuilder).
+addCardCol("bet_budget_version", "bet_budget_version INTEGER NOT NULL DEFAULT 1");
 
 // Idempotent races-column migration for the postmortem flag-driven tier
 // demotion (Card 1 Saratoga 2026-06-07 postmortem). Nullable; only set when a
@@ -454,6 +488,14 @@ if (!racesCols.has("tier_demoted_by")) {
 // sorting/comparison. races.post stays the track-local display string.
 if (!racesCols.has("post_time_utc")) {
   sqlite.exec("ALTER TABLE races ADD COLUMN post_time_utc TEXT");
+}
+
+// Idempotent results-column migration for PR #40: per-race win odds at post.
+const resultsCols = new Set(
+  (sqlite.prepare("PRAGMA table_info(results)").all() as { name: string }[]).map((c) => c.name),
+);
+if (!resultsCols.has("win_odds")) {
+  sqlite.exec("ALTER TABLE results ADD COLUMN win_odds REAL");
 }
 
 // Idempotent brisnet_horse_data migration for PR #16 Phase 2: persist the

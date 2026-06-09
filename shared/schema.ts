@@ -13,6 +13,11 @@ export const cards = sqliteTable("cards", {
   locked: integer("locked", { mode: "boolean" }).notNull().default(false),
   status: text("status", { enum: ["active", "archived"] }).notNull().default("active"),
   archivedAt: text("archived_at"), // ISO timestamp, set when auto-archived
+  // Bet-structure version (PR #40). 1 = legacy flat $13.40 spread (historical
+  // cards, e.g. Card #4 FL 2026-06-01); 2 = BudgetedBetBuilder ($1k tier-weighted
+  // allocator). New cards are created as 2 so only NEW cards get the budgeted
+  // allocator; past cards keep their bets AS-IS for historical accuracy.
+  betBudgetVersion: integer("bet_budget_version").notNull().default(2),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -74,6 +79,7 @@ export const results = sqliteTable("results", {
   superfectaHit: integer("superfecta_hit", { mode: "boolean" }),
   flagsHit: text("flags_hit").notNull().default("[]"), // JSON array
   // Payouts (v2)
+  winOdds: real("win_odds"), // decimal win odds at post (PR #40)
   winPayout: real("win_payout"),
   placePayout: real("place_payout"),
   showPayout: real("show_payout"),
@@ -84,6 +90,31 @@ export const results = sqliteTable("results", {
   payoutsRaw: text("payouts_raw"),
   loggedAt: text("logged_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+// ── Bet ledger (PR #40) ───────────────────────────────────────────────────
+// One row per generated bet leg. cost is set at generation time; payout + hit
+// are filled in when the user enters that race's odds/payouts on the Results
+// page. This is the source of truth for tier/position/flag ROI. Backfilled on
+// boot from existing race.bets.legs for cards that predate this table.
+export const betLegs = sqliteTable("bet_legs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  raceId: integer("race_id")
+    .notNull()
+    .references(() => races.id, { onDelete: "cascade" }),
+  cardId: integer("card_id")
+    .notNull()
+    .references(() => cards.id, { onDelete: "cascade" }),
+  tier: text("tier").notNull(),
+  legType: text("leg_type").notNull(), // WIN | PLACE | SHOW | EXACTA | TRIFECTA | SUPERFECTA
+  structure: text("structure").notNull(),
+  cost: real("cost").notNull(),
+  payout: real("payout"), // null until payouts entered
+  hit: integer("hit", { mode: "boolean" }), // null until graded+payouts entered
+  flagsJson: text("flags_json").notNull().default("[]"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type BetLegRow = typeof betLegs.$inferSelect;
 
 // ── Weather per race (PR #18) ─────────────────────────────────────────────
 // One row per race_id, persisted for backtesting. surfaceImpact is the derived
@@ -142,6 +173,28 @@ export const settings = sqliteTable("settings", {
   tierShareEdge: real("tier_share_edge").notNull().default(0.20),
   tierShareDual: real("tier_share_dual").notNull().default(0.12),
   tierShareRecon: real("tier_share_recon").notNull().default(0.08),
+
+  // ── PR #40: $1k daily risk budget + tier-weighted allocator ──────────────
+  // Fixed dollar budget deployed across each card's non-PASS races, weighted by
+  // tierWeights. Distinct from dailyRiskCapPct (the legacy % model, still used by
+  // the v1 flat builder on historical cards).
+  dailyRiskBudget: real("daily_risk_budget").notNull().default(1000),
+  // "floor-recon" (default): RECON stays RECON on chaos; only SNIPER/EDGE/DUAL
+  // demote one step. "aggressive": RECON→PASS too.
+  chaosDemotionMode: text("chaos_demotion_mode").notNull().default("floor-recon"),
+  // Per-tier card-budget weights. JSON: { SNIPER, EDGE, DUAL, RECON, PASS }.
+  tierWeightsJson: text("tier_weights_json").notNull().default(
+    '{"SNIPER":30,"EDGE":18,"DUAL":10,"RECON":4,"PASS":0}',
+  ),
+  // Per-tier leg-pattern percentages of the race budget. JSON keyed by tier,
+  // each value { win, place, show, exacta, trifecta, superfecta }.
+  legPatternsJson: text("leg_patterns_json").notNull().default(
+    '{"SNIPER":{"win":50,"place":20,"show":0,"exacta":15,"trifecta":15,"superfecta":0},' +
+      '"EDGE":{"win":45,"place":25,"show":0,"exacta":30,"trifecta":0,"superfecta":0},' +
+      '"DUAL":{"win":35,"place":30,"show":20,"exacta":15,"trifecta":0,"superfecta":0},' +
+      '"RECON":{"win":100,"place":0,"show":0,"exacta":0,"trifecta":0,"superfecta":0},' +
+      '"PASS":{"win":0,"place":0,"show":0,"exacta":0,"trifecta":0,"superfecta":0}}',
+  ),
 });
 
 // ── Trackside Daily Show (broadcast video build per card) ─────────────────
@@ -398,9 +451,31 @@ export const insertResultSchema = createInsertSchema(results).omit({
 });
 export const insertSettingsSchema = createInsertSchema(settings).omit({ id: true });
 
-// Result submission from the client (just the finish order string/array)
+// Result submission from the client (finish order + optional $2-base payouts).
+// Payouts are nullable: a race can be graded before its odds are known, then
+// have payouts backfilled later (works on ALL cards, including past ones).
+const payoutNum = z.number().nonnegative().nullable().optional();
 export const resultSubmitSchema = z.object({
   finishOrder: z.array(z.string().min(1)),
+  winOdds: payoutNum,
+  winPayout: payoutNum,
+  placePayout: payoutNum,
+  showPayout: payoutNum,
+  exactaPayout: payoutNum,
+  trifectaPayout: payoutNum,
+  superfectaPayout: payoutNum,
+});
+
+// Standalone payouts entry (backfill on an already-graded race without
+// re-entering the finish order). All fields nullable.
+export const payoutsSubmitSchema = z.object({
+  winOdds: payoutNum,
+  winPayout: payoutNum,
+  placePayout: payoutNum,
+  showPayout: payoutNum,
+  exactaPayout: payoutNum,
+  trifectaPayout: payoutNum,
+  superfectaPayout: payoutNum,
 });
 
 // Update race analysis text
