@@ -383,6 +383,40 @@ CREATE TABLE IF NOT EXISTS deep_postmortems (
   payload TEXT NOT NULL
 );
 
+-- Backtest snapshot harness. card_snapshots freezes the FULL pre-race state of
+-- a card (raw inputs + scoring + bankroll) at score time; card_outcomes records
+-- actual results later. Keeping them separate makes the ROI no-leakage: the
+-- scoring blob is sealed before any race runs. One snapshot per
+-- (card_id, methodology_version) — re-snapshotting upserts.
+CREATE TABLE IF NOT EXISTS card_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  snapshot_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  methodology_version TEXT NOT NULL DEFAULT 'card10-v1',
+  raw_data TEXT NOT NULL DEFAULT '{}',
+  scoring TEXT NOT NULL DEFAULT '{}',
+  bankroll_allocated INTEGER NOT NULL DEFAULT 0,
+  bankroll_cap INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (card_id, methodology_version)
+);
+CREATE INDEX IF NOT EXISTS idx_card_snapshots_card ON card_snapshots(card_id);
+CREATE INDEX IF NOT EXISTS idx_card_snapshots_method ON card_snapshots(methodology_version);
+
+CREATE TABLE IF NOT EXISTS card_outcomes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  race_num INTEGER NOT NULL,
+  horse_id TEXT NOT NULL,
+  finish_position INTEGER,
+  win_payout REAL,
+  place_payout REAL,
+  show_payout REAL,
+  exacta_payout TEXT,
+  recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (card_id, race_num, horse_id)
+);
+CREATE INDEX IF NOT EXISTS idx_card_outcomes_card ON card_outcomes(card_id);
+
 -- Per-race weather forecast (PR #18). One row per race_id, persisted for
 -- backtesting. surface_impact='unknown' means OpenWeather was unreachable and
 -- the engine left every pick untouched. Numeric fields are nullable for that

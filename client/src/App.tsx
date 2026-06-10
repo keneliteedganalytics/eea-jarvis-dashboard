@@ -24,6 +24,7 @@ import DailyShow from "@/pages/DailyShow";
 import About from "@/pages/About";
 import TrackRecord from "@/pages/TrackRecord";
 import Postmortem from "@/pages/Postmortem";
+import Backtest from "@/pages/Backtest";
 
 function AppRouter() {
   return (
@@ -34,6 +35,7 @@ function AppRouter() {
       <Route path="/results" component={Results} />
       <Route path="/analytics" component={Analytics} />
       <Route path="/postmortem" component={Postmortem} />
+      <Route path="/backtest" component={Backtest} />
       <Route path="/historical" component={Historical} />
       <Route path="/historical/:id" component={HistoricalCard} />
       <Route path="/show" component={DailyShow} />
