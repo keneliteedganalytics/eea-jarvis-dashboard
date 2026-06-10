@@ -30,8 +30,9 @@ import {
   fallbackPostTime,
   type PostTime,
 } from "./parsers/post-time";
-import type { InsertRace, RaceWeather } from "@shared/schema";
+import type { InsertRace, RaceWeather, TrackCondition } from "@shared/schema";
 import { getRaceWeather } from "./weather";
+import { inferTrackCondition } from "./weather-overlay";
 import { getBloodstockForCard } from "./brisnet-ingest";
 
 export interface AnalyzeInput {
@@ -221,9 +222,18 @@ export async function analyzeCard(
     weatherByNum.set(br.raceNumber, await getRaceWeather(input.track, pt.utcIso));
   }
 
+  // Wet-track overlay (NWS): one coarse condition per card. Never throws —
+  // null condition leaves the picker untouched. The card-level condition is
+  // applied to every race; per-race overrides happen via the swap/condition API.
+  const overlay = await inferTrackCondition(input.track);
+  const cardTrackCondition: TrackCondition | null = overlay.condition;
+
   // Build per-race scaffolding (fusion happens up front; LLM per race below).
   const fusedRaces = bris.races.map((br: BrisnetRace) =>
-    fuseRace(br, equiByNum.get(br.raceNumber), weights, biasCtx, weatherByNum.get(br.raceNumber)),
+    fuseRace(br, equiByNum.get(br.raceNumber), weights, biasCtx, {
+      surfaceImpact: weatherByNum.get(br.raceNumber)?.surfaceImpact ?? "unknown",
+      trackCondition: cardTrackCondition,
+    }),
   );
 
   // Create the card with placeholder race rows (tier filled after LLM).
@@ -239,6 +249,7 @@ export async function analyzeCard(
     }),
     shape: f.shapeNote,
     flags: "[]",
+    trackCondition: cardTrackCondition,
   }));
   const card = storage.createCard(
     { track: input.track, date: input.date, locked: false },
@@ -327,6 +338,12 @@ export async function analyzeCard(
     // Persist the race-level pick + tier. Fold the v2 tuning flags (A1-A5) in
     // alongside the existing derived flags.
     const flags = [...deriveFlags(fused, weights), ...v2RaceFlags];
+    // Wet-track overlay note for the dashboard read/paceText. Built from the
+    // fusion reason codes so the strip-condition adjustment is explained.
+    const wetNote =
+      cardTrackCondition && fused.weatherAdjustment.reasonCodes.some((r) => r.includes("wet-dirt"))
+        ? ` [Wet strip (${cardTrackCondition.toUpperCase()}): favored front-runners/inside posts, faded deep closers.]`
+        : "";
     if (handicap) {
       const rawPicks = picksFromHandicap(handicap);
       // Postmortem fixes (Card 1 Saratoga 2026-06-07): tighten EDGE class flips,
@@ -362,7 +379,8 @@ export async function analyzeCard(
       // Update the race row directly via storage (tier + picks + scores + read).
       storage.updateRaceFusion(raceId, {
         tier: raceTier,
-        read,
+        read: read + wetNote,
+        paceText: wetNote ? wetNote.trim() : undefined,
         flags: JSON.stringify(flags),
         tierDemotedBy: adj.tierDemotedBy,
         matticeConfirmed,
@@ -407,7 +425,8 @@ export async function analyzeCard(
       }
       storage.updateRaceFusion(raceId, {
         tier: fbTier,
-        read: fbRead,
+        read: fbRead + wetNote,
+        paceText: wetNote ? wetNote.trim() : undefined,
         flags: JSON.stringify(flags),
         tierDemotedBy: adj.tierDemotedBy,
         matticeConfirmed: fbConfirmed,

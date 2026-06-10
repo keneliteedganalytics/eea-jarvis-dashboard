@@ -130,6 +130,9 @@ export interface IStorage {
   reTier(raceId: number): Race | undefined;
   getRaceEvents(raceId: number): RaceEventRow[];
 
+  // Manual win-pick swap (wet-track overlay PR)
+  swapWinPick(raceId: number, newWinPgm: string, reason?: string): Race | undefined;
+
   // Card completion (PR #41)
   completeCard(cardId: number): CardSummaryRow | undefined;
   unlockCard(cardId: number): Card | undefined;
@@ -1021,6 +1024,85 @@ export class DatabaseStorage implements IStorage {
           reTieredAt: new Date().toISOString(),
           oldPicks,
           newPicks,
+        }),
+      })
+      .run();
+    return fresh;
+  }
+
+  // ── Manual win-pick swap (wet-track overlay PR) ───────────────────────────
+  // Promote `newWinPgm` to the win slot; the displaced runners cascade down
+  // (old win → place, place → show, show → fourth). If the new horse already
+  // occupies a board slot it is lifted out of that slot and everyone above it
+  // shifts down by one, so the four slots stay distinct. Win SCORE is preserved
+  // per-slot identity is by pgm; we carry each pick's (pgm,name,score) together.
+  // Records a MANUAL_OVERRIDE race_event with the reason. This is an explicit
+  // operator action, NOT a re-tier: it does not touch predictions, scratches,
+  // tier, or the bet ledger — it only rewrites the four flattened pick columns.
+  swapWinPick(raceId: number, newWinPgm: string, reason?: string): Race | undefined {
+    const race = this.getRace(raceId);
+    if (!race) return undefined;
+    const pgm = newWinPgm.trim();
+    if (!pgm) throw new Error("newWinPgm is required");
+
+    type Slot = { pgm: string | null; name: string | null; score: number | null };
+    const slots: Slot[] = [
+      { pgm: race.winPgm, name: race.winName, score: race.winScore },
+      { pgm: race.placePgm, name: race.placeName, score: race.placeScore },
+      { pgm: race.showPgm, name: race.showName, score: race.showScore },
+      { pgm: race.fourthPgm, name: race.fourthName, score: race.fourthScore },
+    ];
+
+    if (race.winPgm === pgm) {
+      throw new Error(`#${pgm} is already the win pick for race ${raceId}`);
+    }
+
+    // The promoted horse: reuse its existing slot (name/score) if it's already
+    // on the board, otherwise look it up from predictions, else carry just pgm.
+    const existing = slots.find((s) => s.pgm === pgm);
+    let promoted: Slot;
+    if (existing) {
+      promoted = { ...existing };
+    } else {
+      const pred = this.getPredictionsByRace(raceId).find((p) => p.horsePgm === pgm);
+      promoted = {
+        pgm,
+        name: pred?.horseName ?? null,
+        score: pred?.eeaRating != null ? Math.round(pred.eeaRating * 10) / 10 : null,
+      };
+    }
+
+    // New order: promoted first, then the remaining slots in their prior order
+    // (skipping the promoted horse's old position and any empty tail slots).
+    const remaining = slots.filter((s) => s.pgm != null && s.pgm !== pgm);
+    const ordered = [promoted, ...remaining].slice(0, 4);
+    while (ordered.length < 4) ordered.push({ pgm: null, name: null, score: null });
+
+    const oldPicks = {
+      win: race.winPgm, place: race.placePgm, show: race.showPgm, fourth: race.fourthPgm,
+    };
+
+    const patch: Partial<Race> = {
+      winPgm: ordered[0].pgm, winName: ordered[0].name, winScore: ordered[0].score,
+      placePgm: ordered[1].pgm, placeName: ordered[1].name, placeScore: ordered[1].score,
+      showPgm: ordered[2].pgm, showName: ordered[2].name, showScore: ordered[2].score,
+      fourthPgm: ordered[3].pgm, fourthName: ordered[3].name, fourthScore: ordered[3].score,
+    };
+    db.update(races).set(patch).where(eq(races.id, raceId)).run();
+
+    const fresh = this.getRace(raceId)!;
+    db.insert(raceEvents)
+      .values({
+        raceId,
+        type: "MANUAL_OVERRIDE",
+        payloadJson: JSON.stringify({
+          newWinPgm: pgm,
+          reason: reason ?? null,
+          overriddenAt: new Date().toISOString(),
+          oldPicks,
+          newPicks: {
+            win: fresh.winPgm, place: fresh.placePgm, show: fresh.showPgm, fourth: fresh.fourthPgm,
+          },
         }),
       })
       .run();

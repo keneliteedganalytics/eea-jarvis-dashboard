@@ -624,6 +624,10 @@ if (!racesCols.has("scratched_pgms")) {
 if (!racesCols.has("mattice_confirmed")) {
   sqlite.exec("ALTER TABLE races ADD COLUMN mattice_confirmed INTEGER NOT NULL DEFAULT 0");
 }
+// Wet-track overlay: per-race inferred/overridden track condition (nullable).
+if (!racesCols.has("track_condition")) {
+  sqlite.exec("ALTER TABLE races ADD COLUMN track_condition TEXT");
+}
 
 // Idempotent bet_legs-column migration for PR #41: refund flag + timestamp set
 // when a scratch re-tiers a race and the old picks' legs are refunded.

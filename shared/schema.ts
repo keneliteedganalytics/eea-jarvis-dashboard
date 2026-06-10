@@ -77,7 +77,17 @@ export const races = sqliteTable("races", {
   // PR #51: "Mattice Confirmed" badge — true when the race win pick scored ≥75
   // on the Mattice overlay with no veto. Display-only; does not affect tier.
   matticeConfirmed: integer("mattice_confirmed", { mode: "boolean" }).notNull().default(false),
+
+  // Wet-track overlay: inferred (or manually-overridden) track condition for
+  // this race. Null until the weather-overlay classifies it. The picker reads
+  // this to apply wet-track pace re-weighting on dirt.
+  trackCondition: text("track_condition", {
+    enum: ["fast", "good", "wet-fast", "muddy", "sloppy", "frozen"],
+  }),
 });
+
+// Track-condition labels the wet-track overlay assigns to a race.
+export type TrackCondition = "fast" | "good" | "wet-fast" | "muddy" | "sloppy" | "frozen";
 
 // ── One row per race result the user logs ─────────────────────────────────
 export const results = sqliteTable("results", {
