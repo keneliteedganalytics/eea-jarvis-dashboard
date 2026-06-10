@@ -12,6 +12,7 @@ import { Mic, Lock, Check, RefreshCw, Printer } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { HostHero } from "@/components/brand/HostHero";
 import { TrackRecordHero } from "@/components/TrackRecordHero";
+import { MatticeStatsHero } from "@/components/MatticeStatsHero";
 import { DraftCardsSection } from "@/components/DraftCardsSection";
 import { PullCardModal } from "@/components/PullCardModal";
 import { ManualIngestModal } from "@/components/ManualIngestModal";
@@ -126,6 +127,9 @@ export default function Home() {
     <div className="p-4 sm:p-6 max-w-[1400px] mx-auto pb-28">
       {/* Analytics-led hero — overall record + ROI + units, by timeframe */}
       <TrackRecordHero className="mb-4" />
+
+      {/* Mattice 5-factor overlay — running record + current weight phase */}
+      <MatticeStatsHero className="mb-4" />
 
       {/* Hero strip */}
       <div className="rounded-xl border border-gold/15 bg-navy-card p-5 sm:p-6">

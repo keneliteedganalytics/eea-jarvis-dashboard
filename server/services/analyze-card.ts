@@ -17,6 +17,8 @@ import {
   computeCardConviction,
 } from "./card-finishing";
 import { applyPostmortemAdjustments } from "./postmortem-adjustments";
+import { applyOverlay, persistMatticePredictions } from "./mattice-overlay";
+import { PHASE_TIEBREAK } from "./mattice-weight";
 import { getOrFetchBias, toBiasContext } from "./bias-fetcher";
 import { enrichMaiden, type EnrichmentResult } from "./maiden-enrichment";
 import { handicapRace, type HandoffConfig, type Handicap } from "./llm-handoff";
@@ -277,6 +279,11 @@ export async function analyzeCard(
     if (raceId != null) storage.upsertRaceWeather(raceId, w);
   }
 
+  // Mattice overlay config (single settings row). Phase 1 = tiebreak + veto only.
+  const matticeCfg = storage.getSettings();
+  const matticeEnabled = matticeCfg.matticeEnabled ?? true;
+  const matticePhase = matticeCfg.matticeWeightPhase ?? PHASE_TIEBREAK;
+
   let analyzed = 0;
   const finalTiers: Tier[] = [];
   for (const fused of fusedRaces) {
@@ -325,21 +332,44 @@ export async function analyzeCard(
       // Postmortem fixes (Card 1 Saratoga 2026-06-07): tighten EDGE class flips,
       // demote tier on flags hitting the win/place pick, co-top live longshots.
       const adj = applyPostmortemAdjustments(fused, handicap.tier as Tier, rawPicks, flags);
-      const picks = adj.picks;
-      const scores = scoresForPicks(fused, picks);
-      const read = adj.coTopNote
+      let picks = adj.picks;
+      let raceTier = adj.tier;
+      let read = adj.coTopNote
         ? `${handicap.executiveSummary} — ${adj.coTopNote}`
         : handicap.executiveSummary;
+      let matticeConfirmed = false;
+      // Mattice overlay (Phase 1 = tiebreak + veto only). Runs on top of the
+      // LLM/postmortem pick; may swap the win horse on a tiebreak, downgrade the
+      // tier on a veto, and stamp the "Mattice Confirmed" badge.
+      if (matticeEnabled) {
+        const overlay = applyOverlay(fused, raceTier, matticePhase);
+        if (overlay.tiebreakApplied && overlay.winPgm && overlay.winPgm !== picks.winPgm) {
+          const newWin = fused.horses.find((h) => h.pgm === overlay.winPgm);
+          if (newWin) picks = { ...picks, winPgm: newWin.pgm, winName: newWin.name };
+        }
+        raceTier = overlay.tier;
+        matticeConfirmed = overlay.confirmed;
+        if (overlay.note) read = `${read} [Mattice: ${overlay.note}]`;
+        persistMatticePredictions({
+          cardId: card.id,
+          raceId,
+          scores: overlay.scores,
+          systemWinPgm: picks.winPgm,
+          matticeTopPgm: overlay.matticeTopPgm,
+        });
+      }
+      const scores = scoresForPicks(fused, picks);
       // Update the race row directly via storage (tier + picks + scores + read).
       storage.updateRaceFusion(raceId, {
-        tier: adj.tier,
+        tier: raceTier,
         read,
         flags: JSON.stringify(flags),
         tierDemotedBy: adj.tierDemotedBy,
+        matticeConfirmed,
         ...picks,
         ...scores,
       });
-      finalTiers.push(adj.tier);
+      finalTiers.push(raceTier);
       analyzed++;
     } else {
       // No LLM: fall back to the deterministic tier + fused ranking so the card
@@ -354,15 +384,37 @@ export async function analyzeCard(
       };
       const leaderTier = (tierAssign.find((t) => t.pgm === ranked[0]?.pgm)?.tier ?? "PASS") as Tier;
       const adj = applyPostmortemAdjustments(fused, leaderTier, picks, flags);
+      let fbPicks = adj.picks;
+      let fbTier = adj.tier;
+      let fbRead = "LLM unavailable — review manually.";
+      let fbConfirmed = false;
+      if (matticeEnabled) {
+        const overlay = applyOverlay(fused, fbTier, matticePhase);
+        if (overlay.tiebreakApplied && overlay.winPgm && overlay.winPgm !== fbPicks.winPgm) {
+          const newWin = fused.horses.find((h) => h.pgm === overlay.winPgm);
+          if (newWin) fbPicks = { ...fbPicks, winPgm: newWin.pgm, winName: newWin.name };
+        }
+        fbTier = overlay.tier;
+        fbConfirmed = overlay.confirmed;
+        if (overlay.note) fbRead = `${fbRead} [Mattice: ${overlay.note}]`;
+        persistMatticePredictions({
+          cardId: card.id,
+          raceId,
+          scores: overlay.scores,
+          systemWinPgm: fbPicks.winPgm,
+          matticeTopPgm: overlay.matticeTopPgm,
+        });
+      }
       storage.updateRaceFusion(raceId, {
-        tier: adj.tier,
-        read: "LLM unavailable — review manually.",
+        tier: fbTier,
+        read: fbRead,
         flags: JSON.stringify(flags),
         tierDemotedBy: adj.tierDemotedBy,
-        ...adj.picks,
-        ...scoresForPicks(fused, adj.picks),
+        matticeConfirmed: fbConfirmed,
+        ...fbPicks,
+        ...scoresForPicks(fused, fbPicks),
       });
-      finalTiers.push(adj.tier);
+      finalTiers.push(fbTier);
     }
 
     // Persist per-horse predictions (fused figures + LLM reasoning where ranked).

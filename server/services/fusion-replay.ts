@@ -139,7 +139,7 @@ function reconstructPaceFlags(
 // Rebuild a FusedRace for one persisted race from its predictions snapshot. The
 // horses carry the locked composites + bloodstock; ranking is by eeaRating (the
 // same order fuseRace produces) so leader/2nd-best line up for the v2 rules.
-function reconstructFusedRace(race: RaceWithResult, preds: Prediction[]): FusedRace {
+export function reconstructFusedRace(race: RaceWithResult, preds: Prediction[]): FusedRace {
   const conditions = reconstructConditions(race);
   const raceType = classifyRaceType(conditions);
   const shapeNote = race.shape ?? "honest pace";

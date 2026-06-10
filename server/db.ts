@@ -480,6 +480,42 @@ CREATE TABLE IF NOT EXISTS brisnet_race_pars (
   ingested_at TEXT NOT NULL,
   UNIQUE (race_date, track_code, race_number)
 );
+
+-- Mattice 5-factor overlay (PR #51). One row per horse per race that the
+-- overlay scored. The five factors are Dave Mattice's framework (FLGR's primary
+-- handicapper since 2001), each 0-20: Pace & Running Styles, Speed Figures,
+-- Class Levels, Connections, Form & Habits. mattice_score is their sum (0-100);
+-- veto_flag is set when 2+ factors come back "negative". The actual_finish/
+-- won/in_money/graded_at columns are filled by the on-result-ingest auto-grader
+-- so the auto-promotion service can measure the overlay's real edge before it
+-- ever earns weight in the primary score. UNIQUE(card,race,pgm) makes a
+-- re-score idempotent (upsert).
+CREATE TABLE IF NOT EXISTS mattice_predictions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  race_id INTEGER NOT NULL REFERENCES races(id) ON DELETE CASCADE,
+  program_number TEXT NOT NULL,
+  horse_name TEXT,
+  mattice_score INTEGER NOT NULL DEFAULT 0,
+  veto_flag INTEGER NOT NULL DEFAULT 0,
+  factor_pace INTEGER NOT NULL DEFAULT 0,
+  factor_speed INTEGER NOT NULL DEFAULT 0,
+  factor_class INTEGER NOT NULL DEFAULT 0,
+  factor_connections INTEGER NOT NULL DEFAULT 0,
+  factor_form INTEGER NOT NULL DEFAULT 0,
+  evidence_json TEXT NOT NULL DEFAULT '{}',
+  is_system_pick INTEGER NOT NULL DEFAULT 0,
+  is_mattice_top INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'deterministic',
+  predicted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  actual_finish INTEGER,
+  won INTEGER,
+  in_money INTEGER,
+  graded_at TEXT,
+  UNIQUE (card_id, race_id, program_number)
+);
+CREATE INDEX IF NOT EXISTS idx_mattice_predictions_card ON mattice_predictions(card_id);
+CREATE INDEX IF NOT EXISTS idx_mattice_predictions_race ON mattice_predictions(race_id);
 `);
 
 // Idempotent brisnet_race_pars migration: surface + distance are race-level deep
@@ -531,6 +567,15 @@ addCol(
   "leg_patterns_json",
   `leg_patterns_json TEXT NOT NULL DEFAULT '{"SNIPER":{"win":50,"place":20,"show":0,"exacta":15,"trifecta":15,"superfecta":0},"EDGE":{"win":45,"place":25,"show":0,"exacta":30,"trifecta":0,"superfecta":0},"DUAL":{"win":35,"place":30,"show":20,"exacta":15,"trifecta":0,"superfecta":0},"RECON":{"win":100,"place":0,"show":0,"exacta":0,"trifecta":0,"superfecta":0},"PASS":{"win":0,"place":0,"show":0,"exacta":0,"trifecta":0,"superfecta":0}}'`,
 );
+// PR #51: Mattice overlay weight phase. "Let data earn the weight": the overlay
+// starts as a tiebreak + veto only (phase 1) and the auto-promotion service bumps
+// it to a 30% blend (phase 2) then a 50% blend (phase 3) as its logged win%/ROI
+// clears the thresholds — demoting back to phase 1 if performance decays. Stored
+// here (single-row config) since there is no separate system_config table.
+addCol("mattice_enabled", "mattice_enabled INTEGER NOT NULL DEFAULT 1");
+addCol("mattice_weight_phase", "mattice_weight_phase INTEGER NOT NULL DEFAULT 1");
+addCol("mattice_phase_changed_at", "mattice_phase_changed_at TEXT");
+addCol("mattice_phase_reason", "mattice_phase_reason TEXT");
 
 // Idempotent cards-column migration for the Historical archive. Existing rows
 // inherit status='active'; archived_at is nullable and set by the sweep.
@@ -574,6 +619,10 @@ if (!racesCols.has("post_time_utc")) {
 // PR #41: per-race manually-scratched program numbers (JSON array string).
 if (!racesCols.has("scratched_pgms")) {
   sqlite.exec("ALTER TABLE races ADD COLUMN scratched_pgms TEXT NOT NULL DEFAULT '[]'");
+}
+// PR #51: "Mattice Confirmed" badge flag on the race win pick.
+if (!racesCols.has("mattice_confirmed")) {
+  sqlite.exec("ALTER TABLE races ADD COLUMN mattice_confirmed INTEGER NOT NULL DEFAULT 0");
 }
 
 // Idempotent bet_legs-column migration for PR #41: refund flag + timestamp set
