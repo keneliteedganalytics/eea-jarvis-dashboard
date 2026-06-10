@@ -59,6 +59,9 @@ export interface FusedHorse {
   rank: number;
   flags: string[];
   bloodstockAdjustment: BloodstockAdjustment;
+  // Prior wet-track win/ITM rate from PP data (Brisnet/Equibase). Null/absent
+  // when no wet history was parsed. Consumed by the Mattice wet-track form bump.
+  wetWinPct?: number | null;
 }
 
 // Parse a morning-line string ("6-1", "9-2", "7/2", "5", "EVN") into a decimal
@@ -85,6 +88,39 @@ export function parseMlOdds(ml: string | null | undefined): number | null {
 export type SurfaceImpact = "dry" | "damp" | "wet" | "sloppy" | "muddy" | "unknown";
 export interface WeatherInput {
   surfaceImpact: SurfaceImpact;
+  // Wet-track overlay: the coarse NWS-inferred condition for the race, when
+  // available. Drives the spec's pace re-weighting on wet dirt (front-runner
+  // bonus, closer fade, inside-post bonus). Independent of surfaceImpact, which
+  // drives the legacy PR #18 mudder/closer weather block.
+  trackCondition?: "fast" | "good" | "wet-fast" | "muddy" | "sloppy" | "frozen" | null;
+}
+
+// Conditions on wet DIRT where the strip plays speed-favoring (per the wet-track
+// overlay spec): tire the closers, help the front end. wet-fast/muddy/sloppy.
+const WET_DIRT_REWEIGHT = new Set(["wet-fast", "muddy", "sloppy"]);
+
+// Parse a distance string ("6F", "6 1/2F", "1 1/16M") to furlongs. Null when
+// unparseable. Used to gate the inside-post bonus to routes (≥6.5f).
+export function distanceToFurlongs(distance: string | null | undefined): number | null {
+  if (!distance) return null;
+  const s = distance.trim().toUpperCase();
+  const mixed = s.match(/^(\d+)\s+(\d+)\/(\d+)\s*([FM])/);
+  const simpleFrac = s.match(/^(\d+)\/(\d+)\s*([FM])/);
+  const plain = s.match(/^(\d+(?:\.\d+)?)\s*([FM])/);
+  let value: number | null = null;
+  let unit: string | null = null;
+  if (mixed) {
+    value = Number(mixed[1]) + Number(mixed[2]) / Number(mixed[3]);
+    unit = mixed[4];
+  } else if (simpleFrac) {
+    value = Number(simpleFrac[1]) / Number(simpleFrac[2]);
+    unit = simpleFrac[3];
+  } else if (plain) {
+    value = Number(plain[1]);
+    unit = plain[2];
+  }
+  if (value == null || unit == null) return null;
+  return unit === "M" ? value * 8 : value;
 }
 
 // Exposed on FusedRace so downstream consumers (picks API, hero) can see why a
@@ -308,6 +344,23 @@ export function fuseRace(
   const weatherReasons = new Set<string>();
   const bw = weights.bloodstock ?? DEFAULT_WEIGHTS.bloodstock;
 
+  // ── Wet-track overlay re-weighting (spec §3) ──────────────────────────────
+  // On wet DIRT (NWS-inferred condition wet-fast/muddy/sloppy), the strip plays
+  // speed-favoring: front-runners hold, closers can't reel them in. Applied as a
+  // distinct additive layer on top of the legacy PR #18 weather block, gated on
+  // the explicit trackCondition (not surfaceImpact) and dirt only.
+  const wetReweight =
+    !isTurf && WET_DIRT_REWEIGHT.has(weather?.trackCondition ?? "");
+  // Bottom-quartile pace cutoff for the "deep closer" fade. Sorted ascending,
+  // the 25th-percentile pace figure; horses at/below it (with a negative pace
+  // signal) eat the −10.
+  const sortedPace = [...paceVals].sort((a, b) => a - b);
+  const paceQ1 =
+    sortedPace.length >= 4 ? sortedPace[Math.floor(sortedPace.length * 0.25)] : null;
+  const distFurlongs = distanceToFurlongs(conditions.distance);
+  const isRoute = distFurlongs != null && distFurlongs >= 6.5;
+  const wetReasons = new Set<string>();
+
   const horses: FusedHorse[] = interim.map((h) => {
     const loneSpeed = h.pgm === loneSpeedPgm;
     const isEarly = earlyTypes.some((t) => t.pgm === h.pgm);
@@ -339,7 +392,10 @@ export function fuseRace(
         weatherReasons.add("turf-speed-deemphasized");
       }
       // 3) Sloppy/muddy dirt flattens pace: lightly favor closers over speed.
-      if (!isTurf) {
+      //    SUPPRESSED when the wet-track overlay re-weighting is active — the
+      //    overlay (spec §3) owns the pace direction on wet dirt and favors the
+      //    front end instead, so we don't apply two contradictory pace tilts.
+      if (!isTurf && !wetReweight) {
         if (isEarly) {
           baseRating -= wWeather.closerBias * sev;
           weatherReasons.add("speed-trimmed-off-track");
@@ -347,6 +403,37 @@ export function fuseRace(
           baseRating += wWeather.closerBias * sev;
           weatherReasons.add("closer-favored-off-track");
         }
+      }
+    }
+
+    // ── Wet-track overlay re-weighting (spec §3): speed-favoring wet dirt ──────
+    // Front-runner / lone-speed: pace factor weight ×1.5 (an extra +0.5× of the
+    // pace term on top of the rating it already earned). Deep closers (bottom-
+    // quartile pace AND a negative pace signal): −10. Inside posts (1–4) on
+    // routes (≥6.5f): +2. Reflected in flags + reasonCodes for the dashboard.
+    if (wetReweight && baseRating != null) {
+      const frontRunner = loneSpeed || flags.includes("projected-lone-speed") || isEarly;
+      if (frontRunner) {
+        const paceTermH = (eeapFit ?? h.eeap ?? 0) * wRating.eeap_fit * (cls?.form_weight ?? 1);
+        baseRating += paceTermH * 0.5; // ×1.5 total on the pace contribution
+        flags.push("wet-front-runner-boost");
+        wetReasons.add("front-runner-favored-wet-dirt");
+      } else if (
+        paceQ1 != null &&
+        h.eeap != null &&
+        h.eeap <= paceQ1 &&
+        flags.includes("in-pace-duel") === false
+      ) {
+        // Deep closer: bottom-quartile pace with no early-pace involvement.
+        baseRating -= 10;
+        flags.push("wet-closer-fade");
+        wetReasons.add("deep-closer-faded-wet-dirt");
+      }
+      const postNum = Number(h.pgm);
+      if (isRoute && Number.isFinite(postNum) && postNum >= 1 && postNum <= 4) {
+        baseRating += 2;
+        flags.push("wet-inside-post-boost");
+        wetReasons.add("inside-post-favored-wet-dirt");
       }
     }
 
@@ -430,6 +517,7 @@ export function fuseRace(
       rank: 0,
       flags,
       bloodstockAdjustment,
+      wetWinPct: h.wetWinPct,
     };
   });
 
@@ -441,8 +529,11 @@ export function fuseRace(
   if (loneSpeedPgm) shapeNote = `lone speed (#${loneSpeedPgm})`;
   else if (contestedPace) shapeNote = `contested pace (${earlyTypes.length} early types)`;
 
+  // Fold the wet-track overlay reason codes into the race-level summary so the
+  // dashboard whyText/paceText can explain the adjustment.
+  for (const r of Array.from(wetReasons)) weatherReasons.add(r);
   const weatherAdjustment: WeatherAdjustment = {
-    applied: wetTrack && weatherReasons.size > 0,
+    applied: (wetTrack || wetReweight) && weatherReasons.size > 0,
     surface,
     reasonCodes: Array.from(weatherReasons),
   };

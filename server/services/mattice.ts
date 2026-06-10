@@ -56,6 +56,22 @@ export interface MatticeHorseInput {
   flags: string[]; // fusion pace-shape flags (projected-lone-speed, in-pace-duel, ...)
   bloodstockApplied: boolean;
   bloodstockReasons: string[];
+  // Wet-track overlay (spec §4): prior wet-track win/ITM rate from PP data.
+  // Null when no wet-history flag has been parsed for the horse (skip silently).
+  wetWinPct: number | null;
+}
+
+// Race-level context for the scorer. wetDay drives the Form & Habits wet bump.
+export interface MatticeRaceContext {
+  wetDay: boolean;
+}
+
+const NEUTRAL_CTX: MatticeRaceContext = { wetDay: false };
+
+// Per spec §4: a horse "has prior wet-track success" when its PP wet win/ITM
+// rate is a positive number. wetWinPct null/0 → no recognized wet history.
+export function hasWetTrackSuccess(wetWinPct: number | null): boolean {
+  return wetWinPct != null && wetWinPct > 0;
 }
 
 // Field-level context so each factor can be scored relative to the other runners.
@@ -80,6 +96,7 @@ export function inputFromFusedHorse(h: FusedHorse): MatticeHorseInput {
     flags: h.flags ?? [],
     bloodstockApplied: h.bloodstockAdjustment?.applied ?? false,
     bloodstockReasons: h.bloodstockAdjustment?.reasonCodes ?? [],
+    wetWinPct: h.wetWinPct ?? null,
   };
 }
 
@@ -212,7 +229,7 @@ function scoreConnections(h: MatticeHorseInput): MatticeFactor {
 // Recent results, workouts, excuse lines. We approximate current form from the
 // overall fused rating's standing in the field, nudged by any bloodstock/wet
 // signal that fusion surfaced (a recognized positive habit/pattern).
-function scoreForm(h: MatticeHorseInput, field: FieldContext): MatticeFactor {
+function scoreForm(h: MatticeHorseInput, field: FieldContext, ctx: MatticeRaceContext): MatticeFactor {
   const p = percentile(h.eeaRating, field.rating);
   let { score, signal } = bandFromPercentile(p);
   let evidence =
@@ -223,6 +240,14 @@ function scoreForm(h: MatticeHorseInput, field: FieldContext): MatticeFactor {
     score = Math.min(FACTOR_MAX, score + 2);
     if (signal === "negative") signal = "neutral";
     evidence += ` Bloodstock/pattern note: ${h.bloodstockReasons.slice(0, 2).join(", ")}.`;
+  }
+  // Wet-track form bump (spec §4): on a wet day, a horse with prior wet-track
+  // success (PP wet win/ITM rate) earns +3 on Form & Habits. Skipped silently
+  // when no wet history is parsed (wetWinPct null/0).
+  if (ctx.wetDay && hasWetTrackSuccess(h.wetWinPct)) {
+    score = Math.min(FACTOR_MAX, score + 3);
+    if (signal === "negative") signal = "neutral";
+    evidence += ` Wet-track form: ${h.wetWinPct}% wet win/ITM in PP data (+3 wet bump).`;
   }
   return { score, signal, evidence };
 }
@@ -237,13 +262,17 @@ function buildField(inputs: MatticeHorseInput[]): FieldContext {
 }
 
 // Score one horse against the field. Pure + deterministic.
-export function scoreHorse(h: MatticeHorseInput, field: FieldContext): MatticeHorseScore {
+export function scoreHorse(
+  h: MatticeHorseInput,
+  field: FieldContext,
+  ctx: MatticeRaceContext = NEUTRAL_CTX,
+): MatticeHorseScore {
   const factors: Record<MatticeFactorKey, MatticeFactor> = {
     pace: scorePace(h, field),
     speed: scoreSpeed(h, field),
     class: scoreClass(h, field),
     connections: scoreConnections(h),
-    form: scoreForm(h, field),
+    form: scoreForm(h, field, ctx),
   };
   const matticeScore = MATTICE_FACTOR_KEYS.reduce((sum, k) => sum + factors[k].score, 0);
   const negatives = MATTICE_FACTOR_KEYS.filter((k) => factors[k].signal === "negative").length;
@@ -260,14 +289,20 @@ export function scoreHorse(h: MatticeHorseInput, field: FieldContext): MatticeHo
 // Score every horse in a race (deterministic engine). This is the entry point
 // the overlay + backfill call. The LLM enrichment (enrichEvidence) is optional
 // and layered on top by callers that want it; it never alters the numeric verdict.
-export function scoreRace(inputs: MatticeHorseInput[]): MatticeHorseScore[] {
+export function scoreRace(
+  inputs: MatticeHorseInput[],
+  ctx: MatticeRaceContext = NEUTRAL_CTX,
+): MatticeHorseScore[] {
   const field = buildField(inputs);
-  return inputs.map((h) => scoreHorse(h, field));
+  return inputs.map((h) => scoreHorse(h, field, ctx));
 }
 
 // Convenience: score directly from fused horses.
-export function scoreFusedHorses(horses: FusedHorse[]): MatticeHorseScore[] {
-  return scoreRace(horses.map(inputFromFusedHorse));
+export function scoreFusedHorses(
+  horses: FusedHorse[],
+  ctx: MatticeRaceContext = NEUTRAL_CTX,
+): MatticeHorseScore[] {
+  return scoreRace(horses.map(inputFromFusedHorse), ctx);
 }
 
 // The horse with the highest mattice score (Mattice's OWN top pick). Ties broken

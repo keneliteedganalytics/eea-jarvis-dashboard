@@ -558,6 +558,30 @@ export async function registerRoutes(
     }
   });
 
+  // ── Wet-track overlay: manual win-pick swap ───────────────────────────────
+  // Operator override (gated by adminPinGate like every other mutating /api
+  // route). Promotes newWinPgm to win and cascades place→show→fourth; the old
+  // win demotes to place. Records a MANUAL_OVERRIDE race_event with the reason.
+  // Returns the refreshed card so the dashboard re-renders the picks in one hop.
+  app.post("/api/races/:id/swap-picks", (req, res) => {
+    const raceId = Number(req.params.id);
+    const newWinPgm = typeof req.body?.newWinPgm === "string" ? req.body.newWinPgm.trim() : "";
+    const reason = typeof req.body?.reason === "string" ? req.body.reason : undefined;
+    if (!newWinPgm) return res.status(400).json({ error: "newWinPgm is required" });
+    const race = storage.getRace(raceId);
+    if (!race) return res.status(404).json({ error: "Race not found" });
+    const lockedCard = storage.getCard(race.cardId);
+    if (lockedCard?.status === "completed") {
+      return res.status(409).json({ error: "Card is completed (read-only). Unlock it in Settings to edit." });
+    }
+    try {
+      storage.swapWinPick(raceId, newWinPgm, reason);
+      res.json(storage.getCardWithRaces(race.cardId));
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
   // ── PR #41: Mark Card Complete (freeze ROI to lifetime) ───────────────────
   // Lock the card read-only and roll up its card_summary. Returns { card, summary }.
   app.post("/api/cards/:id/complete", (req, res) => {

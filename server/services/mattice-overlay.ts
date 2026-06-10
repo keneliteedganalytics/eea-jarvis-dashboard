@@ -70,8 +70,16 @@ export function applyOverlay(
   fused: FusedRace,
   leaderTier: Tier,
   phase: number = PHASE_TIEBREAK,
+  wetDay?: boolean,
 ): OverlayResult {
-  const scores = scoreRace(fused.horses.map(inputFromFusedHorse));
+  // Wet day = explicit flag, else inferred from the race's weather adjustment
+  // (off-track surface or the wet-track overlay re-weighting having fired).
+  const wx = fused.weatherAdjustment ?? ({} as FusedRace["weatherAdjustment"]);
+  const isWetDay =
+    wetDay ??
+    (["wet", "sloppy", "muddy"].includes(wx.surface ?? "") ||
+      (wx.reasonCodes ?? []).some((r) => r.includes("wet-dirt")));
+  const scores = scoreRace(fused.horses.map(inputFromFusedHorse), { wetDay: isWetDay });
   const byPgm = new Map(scores.map((s) => [s.programNumber, s]));
   const matTop = matticeTopPick(scores);
 
