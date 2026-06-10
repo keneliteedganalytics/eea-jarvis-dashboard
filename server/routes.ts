@@ -55,6 +55,14 @@ import {
 } from "./services/deep-postmortem";
 import { runFusionReplay, runFusionReplayToday } from "./services/fusion-replay";
 import { adminPinGate } from "./middleware/admin-pin";
+import {
+  upsertSnapshot,
+  recordOutcomes,
+  listSnapshots,
+  computeRoi,
+  DEFAULT_METHODOLOGY_VERSION,
+} from "./services/backtest";
+import { snapshotSubmitSchema, outcomesSubmitSchema } from "@shared/schema";
 
 // Body schema for POST /api/cards/on-demand-ingest. Track is fuzzy-resolved
 // server-side; date is validated there too (this only enforces presence/shape).
@@ -168,10 +176,14 @@ export async function registerRoutes(
     res.json(card);
   });
 
-  // Create a card. Body: { card: InsertCard, races: Omit<InsertRace,"cardId">[] }
+  // Create a card. Body: { card: InsertCard, races: Omit<InsertRace,"cardId">[],
+  // snapshot?: SnapshotSubmit }. When `snapshot` is present we also archive a
+  // backtest snapshot in the same request, so every new card is captured at
+  // score time without a second call.
   const createCardSchema = z.object({
     card: insertCardSchema,
     races: z.array(insertRaceSchema.omit({ cardId: true })).default([]),
+    snapshot: snapshotSubmitSchema.optional(),
   });
   app.post("/api/cards", (req, res) => {
     const parsed = createCardSchema.safeParse(req.body);
@@ -179,7 +191,55 @@ export async function registerRoutes(
       return res.status(400).json({ error: parsed.error.flatten() });
     }
     const created = storage.createCard(parsed.data.card, parsed.data.races);
+    if (parsed.data.snapshot) {
+      upsertSnapshot(created.id, parsed.data.snapshot);
+    }
     res.status(201).json(created);
+  });
+
+  // ── Backtest snapshot harness ─────────────────────────────────────────────
+  // Capture the full pre-race state of a card at score time. Idempotent on
+  // (cardId, methodologyVersion). Admin-pin gated (POST under /api).
+  app.post("/api/cards/:id/snapshot", (req, res) => {
+    const id = Number(req.params.id);
+    if (!storage.getCard(id)) return res.status(404).json({ error: "Card not found" });
+    const parsed = snapshotSubmitSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+    const snap = upsertSnapshot(id, parsed.data);
+    res.status(201).json(snap);
+  });
+
+  // Record actual race outcomes after the card runs. Upserts per
+  // (cardId, raceNum, horseId).
+  app.post("/api/cards/:id/outcomes", (req, res) => {
+    const id = Number(req.params.id);
+    if (!storage.getCard(id)) return res.status(404).json({ error: "Card not found" });
+    const parsed = outcomesSubmitSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+    const rows = recordOutcomes(id, parsed.data.outcomes);
+    res.status(201).json({ recorded: rows.length, outcomes: rows });
+  });
+
+  // List snapshot summaries for a methodology version (read — no PIN).
+  app.get("/api/backtest/snapshots", (req, res) => {
+    const version =
+      typeof req.query.methodologyVersion === "string" && req.query.methodologyVersion
+        ? req.query.methodologyVersion
+        : DEFAULT_METHODOLOGY_VERSION;
+    res.json(listSnapshots(version));
+  });
+
+  // Per-tier ROI by joining snapshots ↔ outcomes (read — no PIN).
+  app.get("/api/backtest/roi", (req, res) => {
+    const version =
+      typeof req.query.methodologyVersion === "string" && req.query.methodologyVersion
+        ? req.query.methodologyVersion
+        : DEFAULT_METHODOLOGY_VERSION;
+    res.json(computeRoi(version));
   });
 
   // ── Bankroll ledger (PR #44) ──────────────────────────────────────────────

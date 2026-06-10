@@ -550,6 +550,98 @@ export const deepPostmortems = sqliteTable("deep_postmortems", {
   payload: text("payload").notNull(), // JSON of DeepPostmortem
 });
 
+// ── Backtest snapshot harness ─────────────────────────────────────────────
+// Forward-looking backtest: historical entry data is NOT retrievable from open
+// web sources, so we persist the FULL state of a card at score time and only
+// later attach actual outcomes. This makes the eventual ROI no-leakage — the
+// scoring blob is frozen before any race ran. One snapshot per
+// (cardId, methodologyVersion); re-snapshotting the same pair overwrites.
+export const cardSnapshots = sqliteTable("card_snapshots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  cardId: integer("card_id")
+    .notNull()
+    .references(() => cards.id, { onDelete: "cascade" }),
+  snapshotAt: text("snapshot_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  // Which scoring stack produced this snapshot, e.g. the 4-layer Card #10 stack.
+  methodologyVersion: text("methodology_version").notNull().default("card10-v1"),
+  // Frozen inputs: entries, M/L odds, jockey/trainer per horse, PrimePower,
+  // speed figs, local picks. JSON blob (string).
+  rawData: text("raw_data").notNull().default("{}"),
+  // Frozen outputs: per-race A/B/C/D + tier + bet size + reasoning. JSON blob.
+  scoring: text("scoring").notNull().default("{}"),
+  bankrollAllocated: integer("bankroll_allocated").notNull().default(0), // cents
+  bankrollCap: integer("bankroll_cap").notNull().default(0), // cents
+});
+
+// Actual race outcomes, recorded AFTER the card runs. Kept separate from
+// card_snapshots so the snapshot stays an untouched pre-race artifact. One row
+// per (cardId, raceNum, horseId).
+export const cardOutcomes = sqliteTable("card_outcomes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  cardId: integer("card_id")
+    .notNull()
+    .references(() => cards.id, { onDelete: "cascade" }),
+  raceNum: integer("race_num").notNull(),
+  horseId: text("horse_id").notNull(), // program number or horse name
+  finishPosition: integer("finish_position"), // nullable until known
+  winPayout: real("win_payout"),
+  placePayout: real("place_payout"),
+  showPayout: real("show_payout"),
+  exactaPayout: text("exacta_payout"),
+  recordedAt: text("recorded_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type CardSnapshotRow = typeof cardSnapshots.$inferSelect;
+export type CardOutcomeRow = typeof cardOutcomes.$inferSelect;
+
+// Client submission for POST /api/cards/:id/snapshot. rawData/scoring are
+// free-form JSON the caller frames; bankroll figures are integer cents.
+export const snapshotSubmitSchema = z.object({
+  rawData: z.unknown().optional(),
+  scoring: z.unknown().optional(),
+  bankrollAllocated: z.number().int().nonnegative().default(0),
+  bankrollCap: z.number().int().nonnegative().default(0),
+  methodologyVersion: z.string().min(1).optional(),
+});
+export type SnapshotSubmit = z.infer<typeof snapshotSubmitSchema>;
+
+// One actual-outcome row in the POST /api/cards/:id/outcomes body.
+export const outcomeRowSchema = z.object({
+  raceNum: z.number().int().positive(),
+  horseId: z.string().min(1),
+  finishPosition: z.number().int().positive().nullable().optional(),
+  winPayout: z.number().nonnegative().nullable().optional(),
+  placePayout: z.number().nonnegative().nullable().optional(),
+  showPayout: z.number().nonnegative().nullable().optional(),
+  exactaPayout: z.string().nullable().optional(),
+});
+export const outcomesSubmitSchema = z.object({
+  outcomes: z.array(outcomeRowSchema).min(1),
+});
+export type OutcomeSubmit = z.infer<typeof outcomeRowSchema>;
+
+// Per-tier ROI roll-up returned by GET /api/backtest/roi.
+export interface BacktestTierRoi {
+  tier: string;
+  bets: number;
+  wins: number;
+  totalStaked: number; // dollars
+  totalReturned: number; // dollars
+  roi: number | null; // percent; null when nothing staked
+  sampleSize: number;
+}
+
+// One snapshot summary returned by GET /api/backtest/snapshots.
+export interface BacktestSnapshotSummary {
+  cardId: number;
+  date: string;
+  track: string;
+  snapshotAt: string;
+  methodologyVersion: string;
+  raceCount: number;
+  tiersByCount: { SNIPER: number; EDGE: number; DUAL: number; RECON: number; PASS: number };
+}
+
 // ── Insert schemas ────────────────────────────────────────────────────────
 export const insertCardSchema = createInsertSchema(cards).omit({
   id: true,
