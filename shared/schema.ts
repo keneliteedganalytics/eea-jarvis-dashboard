@@ -73,6 +73,10 @@ export const races = sqliteTable("races", {
   // works on every card type (predictions-backed or manual-ingest). Toggled by
   // the per-pick Scratch button; un-scratch removes the pgm from the array.
   scratchedPgms: text("scratched_pgms").notNull().default("[]"),
+
+  // PR #51: "Mattice Confirmed" badge — true when the race win pick scored ≥75
+  // on the Mattice overlay with no veto. Display-only; does not affect tier.
+  matticeConfirmed: integer("mattice_confirmed", { mode: "boolean" }).notNull().default(false),
 });
 
 // ── One row per race result the user logs ─────────────────────────────────
@@ -306,6 +310,16 @@ export const settings = sqliteTable("settings", {
       '"RECON":{"win":100,"place":0,"show":0,"exacta":0,"trifecta":0,"superfecta":0},' +
       '"PASS":{"win":0,"place":0,"show":0,"exacta":0,"trifecta":0,"superfecta":0}}',
   ),
+
+  // ── PR #51: Mattice overlay weight phase ─────────────────────────────────
+  // Phase 1 = tiebreak + veto only (no score blend); 2 = 0.7·fused + 0.3·mattice;
+  // 3 = 0.5·fused + 0.5·mattice. The auto-promotion service moves this between
+  // phases off the overlay's logged win%/ROI. matticeEnabled is a master kill
+  // switch (the picker treats a disabled overlay as inert).
+  matticeEnabled: integer("mattice_enabled", { mode: "boolean" }).notNull().default(true),
+  matticeWeightPhase: integer("mattice_weight_phase").notNull().default(1),
+  matticePhaseChangedAt: text("mattice_phase_changed_at"),
+  matticePhaseReason: text("mattice_phase_reason"),
 });
 
 // ── Trackside Daily Show (broadcast video build per card) ─────────────────
@@ -593,6 +607,104 @@ export const cardOutcomes = sqliteTable("card_outcomes", {
 
 export type CardSnapshotRow = typeof cardSnapshots.$inferSelect;
 export type CardOutcomeRow = typeof cardOutcomes.$inferSelect;
+
+// ── Mattice 5-factor overlay (PR #51) ─────────────────────────────────────
+// One row per horse the overlay scored, per race. Dave Mattice's framework
+// (FLGR's primary handicapper since 2001) — each factor 0-20:
+//   1. Pace & Running Styles — dueling speed vs lone pacesetter
+//   2. Speed Figures — lifetime tops + most recent figures
+//   3. Class Levels — dropping down vs stepping up
+//   4. Connections — recent jockey/trainer success
+//   5. Form & Habits — recent results, workouts, excuse lines
+// matticeScore = sum of the five (0-100). vetoFlag = 2+ factors "negative".
+// actualFinish/won/inMoney/gradedAt are backfilled by the on-result-ingest
+// auto-grader; they feed the auto-promotion service. UNIQUE(card,race,pgm) so a
+// re-score upserts.
+export const matticePredictions = sqliteTable("mattice_predictions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  cardId: integer("card_id")
+    .notNull()
+    .references(() => cards.id, { onDelete: "cascade" }),
+  raceId: integer("race_id")
+    .notNull()
+    .references(() => races.id, { onDelete: "cascade" }),
+  programNumber: text("program_number").notNull(),
+  horseName: text("horse_name"),
+  matticeScore: integer("mattice_score").notNull().default(0),
+  vetoFlag: integer("veto_flag", { mode: "boolean" }).notNull().default(false),
+  factorPace: integer("factor_pace").notNull().default(0),
+  factorSpeed: integer("factor_speed").notNull().default(0),
+  factorClass: integer("factor_class").notNull().default(0),
+  factorConnections: integer("factor_connections").notNull().default(0),
+  factorForm: integer("factor_form").notNull().default(0),
+  // Per-factor { signal, evidence } detail, keyed by factor name. JSON.
+  evidenceJson: text("evidence_json").notNull().default("{}"),
+  // Was this horse the system's (fused) win pick for the race?
+  isSystemPick: integer("is_system_pick", { mode: "boolean" }).notNull().default(false),
+  // Was this horse Mattice's OWN top horse (highest matticeScore) for the race?
+  isMatticeTop: integer("is_mattice_top", { mode: "boolean" }).notNull().default(false),
+  // "deterministic" (figure-derived) or "llm" (Anthropic-enriched).
+  source: text("source").notNull().default("deterministic"),
+  predictedAt: text("predicted_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  actualFinish: integer("actual_finish"),
+  won: integer("won", { mode: "boolean" }),
+  inMoney: integer("in_money", { mode: "boolean" }),
+  gradedAt: text("graded_at"),
+});
+
+export type MatticePrediction = typeof matticePredictions.$inferSelect;
+export const insertMatticePredictionSchema = createInsertSchema(matticePredictions).omit({
+  id: true,
+  predictedAt: true,
+});
+export type InsertMatticePrediction = z.infer<typeof insertMatticePredictionSchema>;
+
+// Mattice factor signal — one of three buckets the scorer assigns each factor.
+export type MatticeSignal = "positive" | "neutral" | "negative";
+export const MATTICE_FACTOR_KEYS = [
+  "pace",
+  "speed",
+  "class",
+  "connections",
+  "form",
+] as const;
+export type MatticeFactorKey = (typeof MATTICE_FACTOR_KEYS)[number];
+
+// One factor's verdict: a 0-20 score, a signal bucket, and a 1-line rationale.
+export interface MatticeFactor {
+  score: number; // 0-20
+  signal: MatticeSignal;
+  evidence: string; // 1-sentence rationale with source
+}
+
+// Full per-horse overlay verdict the scorer returns (pre-persistence).
+export interface MatticeHorseScore {
+  programNumber: string;
+  horseName: string;
+  matticeScore: number; // 0-100, sum of the five factors
+  vetoFlag: boolean; // true when 2+ factors are "negative"
+  factors: Record<MatticeFactorKey, MatticeFactor>;
+  source: "deterministic" | "llm";
+}
+
+// Running performance roll-up the dashboard tile + auto-promotion read.
+export interface MatticeStats {
+  n: number; // total graded races
+  systemPickWins: number; // graded races where Mattice's pick = system pick AND won
+  systemPickPlays: number;
+  systemPickWinPct: number | null;
+  matticeTopWins: number; // graded races where Mattice's OWN top horse won
+  matticeTopPlays: number;
+  matticeTopWinPct: number | null;
+  equibaseFavWinPct: number | null; // baseline: system win-pick win%
+  roiPct: number | null; // flat-bet $2 win on Mattice's top horse
+  weightPhase: number; // 1 | 2 | 3
+  phaseLabel: string; // "Phase 1: Tiebreak" | "Phase 2: 30%" | "Phase 3: 50%"
+  phaseChangedAt: string | null;
+  phaseReason: string | null;
+  vetoCount: number; // graded predictions carrying a veto flag
+  generatedAt: string;
+}
 
 // Client submission for POST /api/cards/:id/snapshot. rawData/scoring are
 // free-form JSON the caller frames; bankroll figures are integer cents.

@@ -43,6 +43,7 @@ import { startEquibaseIngestCron } from "./services/equibase-cron";
 import { startWeatherCron } from "./services/weather-cron";
 import { startScratchRefreshCron } from "./services/scratch-refresh-cron";
 import { startResultsPollerCron, autoGradeRace } from "./services/results-poller-cron";
+import { getMatticeStats } from "./services/mattice-weight";
 import { fetchOtbResults } from "./services/otb-results";
 import { refreshScratchesForCard, isScratchRefreshError } from "./services/scratch-refresh";
 import { brisnetAdminRouter } from "./routes/brisnet";
@@ -833,6 +834,20 @@ export async function registerRoutes(
   // Distinct list of tracks with graded race counts, for the Per-Track picker.
   app.get("/api/analytics/tracks", (_req, res) => {
     res.json(buildAnalyticsTracks());
+  });
+
+  // ── Mattice overlay (PR #51) ───────────────────────────────────────────────
+  // Running roll-up + current weight phase for the dashboard tile. Read-only;
+  // never mutates the phase (promotion/demotion happens on grading).
+  app.get("/api/mattice/stats", (_req, res) => {
+    res.json(getMatticeStats());
+  });
+
+  // Per-card overlay predictions (scores, vetoes, evidence) for the card view.
+  app.get("/api/mattice/by-card/:cardId", (req, res) => {
+    const cardId = Number(req.params.cardId);
+    if (!Number.isFinite(cardId)) return res.status(400).json({ error: "bad cardId" });
+    res.json(storage.getMatticeByCard(cardId));
   });
 
   // Lifetime scorecard — aggregates across ALL cards (active + archived).

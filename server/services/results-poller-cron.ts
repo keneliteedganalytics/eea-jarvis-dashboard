@@ -15,6 +15,7 @@ import { sqlite } from "../db";
 import { storage } from "../storage";
 import { broadcastEvent } from "./events";
 import { fetchOtbResults, type OtbRaceResult } from "./otb-results";
+import { refreshMatticeWeight } from "./mattice-weight";
 
 const POLL_MS = 5 * 60 * 1000;
 const GRACE_MS = 5 * 60 * 1000; // wait 5 min past post before looking
@@ -98,6 +99,20 @@ export function gradeRaceFromOtb(
     superfectaPayout: otb.superfectaPayout ?? null,
     payoutsRaw: JSON.stringify(otb.payoutsRaw),
   });
+  // Mattice overlay auto-grade: fill won/in_money for the race's overlay
+  // predictions, then refresh the weight phase from the accumulated record.
+  // A $2 win mutuel maps the overlay's top horse to its ROI when it won.
+  try {
+    storage.gradeMatticeForRace(raceId, otb.finishOrder);
+    const payoutByKey = new Map<string, number>();
+    if (otb.winPayout != null && otb.winPgm != null) {
+      payoutByKey.set(`${raceId}:${String(otb.winPgm)}`, otb.winPayout);
+    }
+    refreshMatticeWeight({ payoutByKey });
+  } catch (e) {
+    console.error(`[mattice] grade/refresh failed race ${raceId}:`, e);
+  }
+
   const race = storage.getRace(raceId);
   const bankroll = race ? storage.getCardBankroll(race.cardId) : null;
   broadcastEvent("race-graded", {

@@ -21,6 +21,7 @@ import {
   raceEvents,
   cardSummaries,
   bankrollEvents,
+  matticePredictions,
 } from "@shared/schema";
 import type {
   Card,
@@ -62,6 +63,8 @@ import type {
   CardSummaryRow,
   CardSummaryTier,
   PassWinMissHorse,
+  MatticePrediction,
+  InsertMatticePrediction,
 } from "@shared/schema";
 import type { PedigreeSummary } from "@shared/schema";
 import { db } from "./db";
@@ -155,6 +158,13 @@ export interface IStorage {
   getPredictionsByRace(raceId: number): Prediction[];
   getPredictionsByCard(cardId: number): Prediction[];
   deletePredictionsByCard(cardId: number): void;
+
+  // Mattice overlay predictions (PR #51)
+  upsertMatticePrediction(row: InsertMatticePrediction): MatticePrediction;
+  getMatticeByRace(raceId: number): MatticePrediction[];
+  getMatticeByCard(cardId: number): MatticePrediction[];
+  getAllMatticePredictions(): MatticePrediction[];
+  gradeMatticeForRace(raceId: number, finishOrder: string[]): number;
 
   // Prediction outcomes
   upsertPredictionOutcome(row: InsertPredictionOutcome): PredictionOutcome;
@@ -1432,6 +1442,84 @@ export class DatabaseStorage implements IStorage {
     for (const r of raceRows) {
       db.delete(predictions).where(eq(predictions.raceId, r.id)).run();
     }
+  }
+
+  // ── Mattice overlay predictions (PR #51) ──────────────────────────────────
+  // Upsert keyed on (cardId, raceId, programNumber) so re-scoring a card is
+  // idempotent. We preserve any grading already attached to the prior row so a
+  // re-score before results arrive doesn't wipe a graded outcome.
+  upsertMatticePrediction(row: InsertMatticePrediction): MatticePrediction {
+    const existing = db
+      .select()
+      .from(matticePredictions)
+      .where(
+        and(
+          eq(matticePredictions.cardId, row.cardId),
+          eq(matticePredictions.raceId, row.raceId),
+          eq(matticePredictions.programNumber, row.programNumber),
+        ),
+      )
+      .get();
+    if (existing) {
+      const patch: Partial<MatticePrediction> = {
+        horseName: row.horseName ?? existing.horseName,
+        matticeScore: row.matticeScore ?? existing.matticeScore,
+        vetoFlag: row.vetoFlag ?? existing.vetoFlag,
+        factorPace: row.factorPace ?? existing.factorPace,
+        factorSpeed: row.factorSpeed ?? existing.factorSpeed,
+        factorClass: row.factorClass ?? existing.factorClass,
+        factorConnections: row.factorConnections ?? existing.factorConnections,
+        factorForm: row.factorForm ?? existing.factorForm,
+        evidenceJson: row.evidenceJson ?? existing.evidenceJson,
+        isSystemPick: row.isSystemPick ?? existing.isSystemPick,
+        isMatticeTop: row.isMatticeTop ?? existing.isMatticeTop,
+        source: row.source ?? existing.source,
+      };
+      db.update(matticePredictions).set(patch).where(eq(matticePredictions.id, existing.id)).run();
+      return db.select().from(matticePredictions).where(eq(matticePredictions.id, existing.id)).get()!;
+    }
+    return db.insert(matticePredictions).values(row).returning().get();
+  }
+
+  getMatticeByRace(raceId: number): MatticePrediction[] {
+    return db.select().from(matticePredictions).where(eq(matticePredictions.raceId, raceId)).all();
+  }
+
+  getMatticeByCard(cardId: number): MatticePrediction[] {
+    return db.select().from(matticePredictions).where(eq(matticePredictions.cardId, cardId)).all();
+  }
+
+  getAllMatticePredictions(): MatticePrediction[] {
+    return db.select().from(matticePredictions).all();
+  }
+
+  // On-result-ingest auto-grade. Fills actual_finish / won / in_money / graded_at
+  // for every overlay prediction on the race by matching program_number against
+  // the chart finish order (finishOrder[0] is the winner). in_money = top 3.
+  // Returns the number of predictions graded. Idempotent — re-grading overwrites.
+  gradeMatticeForRace(raceId: number, finishOrder: string[]): number {
+    const rows = this.getMatticeByRace(raceId);
+    if (rows.length === 0) return 0;
+    const finishByPgm = new Map<string, number>();
+    finishOrder.forEach((pgm, idx) => {
+      if (!finishByPgm.has(String(pgm))) finishByPgm.set(String(pgm), idx + 1);
+    });
+    const gradedAt = new Date().toISOString();
+    let graded = 0;
+    for (const r of rows) {
+      const finish = finishByPgm.get(String(r.programNumber)) ?? null;
+      db.update(matticePredictions)
+        .set({
+          actualFinish: finish,
+          won: finish === 1,
+          inMoney: finish != null && finish <= 3,
+          gradedAt,
+        })
+        .where(eq(matticePredictions.id, r.id))
+        .run();
+      graded++;
+    }
+    return graded;
   }
 
   // ── EEA v1: prediction outcomes ───────────────────────────────────────────
