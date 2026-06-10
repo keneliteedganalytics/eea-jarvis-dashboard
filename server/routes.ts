@@ -55,6 +55,7 @@ import {
   getDeepPostmortem,
 } from "./services/deep-postmortem";
 import { runFusionReplay, runFusionReplayToday } from "./services/fusion-replay";
+import { runMatticeBackfill } from "./services/mattice-backfill";
 import { adminPinGate } from "./middleware/admin-pin";
 import {
   upsertSnapshot,
@@ -651,6 +652,23 @@ export async function registerRoutes(
       res.json(runFusionReplay(id));
     } catch (e) {
       console.error(`[fusion-replay] failed for card ${id}:`, e);
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  // ── PR #52: Mattice overlay backfill ──────────────────────────────────────
+  // Re-run the Mattice 5-factor overlay across an already-ingested card (no
+  // re-ingest) and persist the tiebreak/veto/confirmed results — the HTTP twin
+  // of scripts/backfill_mattice_card.ts so it can be triggered against the live
+  // server via curl. Admin-pin gated by the global adminPinGate (mutating /api
+  // POST requires x-admin-pin).
+  app.post("/api/cards/:id/mattice-backfill", (req, res) => {
+    const id = Number(req.params.id);
+    if (!storage.getCard(id)) return res.status(404).json({ error: "Card not found" });
+    try {
+      res.json(runMatticeBackfill(id));
+    } catch (e) {
+      console.error(`[mattice-backfill] failed for card ${id}:`, e);
       res.status(500).json({ error: (e as Error).message });
     }
   });
