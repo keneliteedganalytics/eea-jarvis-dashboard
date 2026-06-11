@@ -584,6 +584,24 @@ export async function registerRoutes(
     }
   });
 
+  // ── Repair flags: rewrite races.flags as a proper JSON string-array ────────
+  // Some legacy cards (e.g. Thistledown #19) wrote flags as plain " | "/"," text
+  // instead of JSON, which crashed the client's JSON.parse. The client is now
+  // tolerant, but this lets the operator normalize the stored value. Admin-pin
+  // gated by the global adminPinGate (mutating /api).
+  const updateRaceFlagsSchema = z.object({ flags: z.array(z.string()) });
+  app.patch("/api/races/:id/flags", (req, res) => {
+    const raceId = Number(req.params.id);
+    const parsed = updateRaceFlagsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+    const race = storage.getRace(raceId);
+    if (!race) return res.status(404).json({ error: "Race not found" });
+    const updated = storage.updateRaceFlags(raceId, JSON.stringify(parsed.data.flags));
+    res.json(updated);
+  });
+
   // ── Wet-track overlay: manual win-pick swap ───────────────────────────────
   // Operator override (gated by adminPinGate like every other mutating /api
   // route). Promotes newWinPgm to win and cascades place→show→fourth; the old

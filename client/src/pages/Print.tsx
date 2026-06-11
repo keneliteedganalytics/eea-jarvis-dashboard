@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { useRoute } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
+import { parseFlags } from "@/lib/parseFlags";
 import "../print.css";
 
 // ── Types for the /print payload ─────────────────────────────────────────
@@ -88,7 +89,7 @@ function RaceBlock({
   summary: string | null;
   summaryLoading: boolean;
 }) {
-  const flags = JSON.parse(race.flags || "[]") as string[];
+  const flags = parseFlags(race.flags);
   const tier = race.tier.toUpperCase();
   return (
     <div className="print-race">

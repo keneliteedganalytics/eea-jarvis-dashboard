@@ -8,6 +8,7 @@ import { PedigreeChip } from "@/components/PedigreeChip";
 import { ScopeLogo } from "@/components/brand/ScopeLogo";
 import { useJarvis } from "@/lib/jarvis";
 import { tierOf } from "@/lib/tiers";
+import { parseFlags } from "@/lib/parseFlags";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -242,7 +243,7 @@ export default function RaceDetail() {
   }
 
   const cfg = tierOf(race.tier);
-  const flags = JSON.parse(race.flags || "[]") as string[];
+  const flags = parseFlags(race.flags);
   const bets = race.bets;
   const order = race.result ? (JSON.parse(race.result.finishOrder) as string[]) : null;
   const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });

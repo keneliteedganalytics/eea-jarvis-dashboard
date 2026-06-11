@@ -107,6 +107,7 @@ export interface IStorage {
   getRace(id: number): Race | undefined;
   getRacesByCard(cardId: number): Race[];
   updateRaceText(id: number, whyText?: string, paceText?: string): Race | undefined;
+  updateRaceFlags(id: number, flagsJson: string): Race | undefined;
   updateRaceFusion(id: number, patch: Partial<Race>): Race | undefined;
   getRaceWeather(raceId: number): RaceWeather | null;
   upsertRaceWeather(raceId: number, w: RaceWeather): void;
@@ -545,6 +546,13 @@ export class DatabaseStorage implements IStorage {
     if (whyText !== undefined) patch.whyText = whyText;
     if (paceText !== undefined) patch.paceText = paceText;
     db.update(races).set(patch).where(eq(races.id, id)).run();
+    return this.getRace(id);
+  }
+
+  // Write the flags column as a JSON string-array. Caller is responsible for
+  // JSON.stringify; mirrors updateRaceText's direct-column write.
+  updateRaceFlags(id: number, flagsJson: string): Race | undefined {
+    db.update(races).set({ flags: flagsJson }).where(eq(races.id, id)).run();
     return this.getRace(id);
   }
 
