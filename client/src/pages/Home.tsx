@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import type { CardWithRaces } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -53,6 +54,25 @@ function StatBox({ label, value, accent }: { label: string; value: string | numb
   );
 }
 
+// Active card summary as returned by the /api/cards list endpoint.
+interface CardListItem {
+  id: number;
+  track: string;
+  date: string;
+  status: string;
+}
+
+// Today's date as YYYY-MM-DD in the user's racing timezone (America/Boise),
+// so the track switcher matches cards stored as MDT calendar dates.
+function boiseToday(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Boise",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 const LEGEND: { tier: string; desc: string }[] = [
   { tier: "SNIPER", desc: "Top across all 3 sources, ≥4pt class edge" },
   { tier: "EDGE", desc: "Tops with one flag, still rated #1" },
@@ -61,8 +81,26 @@ const LEGEND: { tier: string; desc: string }[] = [
   { tier: "PASS", desc: "Field too wide or no clear top" },
 ];
 
+// Workout glyphs that appear in race reads/summaries. Documented here and on
+// the printable bet card so the symbols aren't undefined in the UI.
+const WORKOUT_LEGEND: { glyph: string; label: string }[] = [
+  { glyph: "🔥", label: "Bullet workout" },
+  { glyph: "⏱️", label: "Gate work" },
+  { glyph: "📉", label: "No workout edge" },
+];
+
 export default function Home() {
-  const { data: card, isLoading } = useQuery<CardWithRaces>({ queryKey: ["/api/cards/latest"] });
+  // When >1 active card exists for today, the track switcher sets this to view
+  // a specific card; undefined means "show the latest card" (default behavior).
+  const [selectedCardId, setSelectedCardId] = useState<number | undefined>(undefined);
+
+  const { data: activeCards = [] } = useQuery<CardListItem[]>({ queryKey: ["/api/cards"] });
+  const today = boiseToday();
+  const todaysCards = activeCards.filter((c) => c.status === "active" && c.date === today);
+  const showSwitcher = todaysCards.length > 1;
+
+  const activeCardKey = selectedCardId ? ["/api/cards", selectedCardId] : ["/api/cards/latest"];
+  const { data: card, isLoading } = useQuery<CardWithRaces>({ queryKey: activeCardKey });
   const jarvis = useJarvis();
   const { toast } = useToast();
 
@@ -71,7 +109,7 @@ export default function Home() {
       if (!card) return;
       await apiRequest("PATCH", `/api/cards/${card.id}`, { locked: true });
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: activeCardKey }),
   });
 
   const fetchNowMutation = useMutation({
@@ -80,7 +118,7 @@ export default function Home() {
       return res.json() as Promise<{ ok: boolean; graded: number; skipped: number; cards: number }>;
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] });
+      queryClient.invalidateQueries({ queryKey: activeCardKey });
       toast({
         title: data.graded > 0 ? `Graded ${data.graded} race${data.graded === 1 ? "" : "s"}` : "No new results",
         description:
@@ -219,11 +257,51 @@ export default function Home() {
               </div>
             ))}
           </div>
+
+          {/* Workout signal glyphs used in race reads/summaries */}
+          <div className="mt-4 border-t border-gold/10 pt-3">
+            <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-2">
+              Workout Signals
+            </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+              {WORKOUT_LEGEND.map((w) => (
+                <span key={w.label} className="inline-flex items-center gap-1.5 text-[11px] text-slate-brand">
+                  <span className="text-sm leading-none">{w.glyph}</span>
+                  {w.label}
+                </span>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Draft cards awaiting review (above the active card's races) */}
       <DraftCardsSection />
+
+      {/* Track switcher — only when more than one active card exists today */}
+      {showSwitcher && (
+        <div className="mt-4">
+          <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-2">
+            Today's Cards
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {todaysCards.map((c) => {
+              const selected = selectedCardId == null ? c.id === card.id : c.id === selectedCardId;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setSelectedCardId(c.id)}
+                  data-testid={`chip-card-${c.id}`}
+                  className="focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50 rounded-full"
+                >
+                  <Pill variant={selected ? "gold" : "muted"}>{c.track}</Pill>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Race rows */}
       <div className="mt-4 space-y-3">

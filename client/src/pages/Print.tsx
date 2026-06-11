@@ -243,6 +243,10 @@ export default function Print() {
             {card.date} · {races.length} races · Bankroll {money(card.sizing.bankroll)} · Daily
             cap {money(card.sizing.dailyCap)} ({(card.sizing.dailyRiskCapPct * 100).toFixed(1)}%)
           </div>
+          <div className="workout-key">
+            <span className="label">Workout Signals</span>
+            🔥 Bullet workout · ⏱️ Gate work · 📉 No workout edge
+          </div>
         </div>
 
         {races.map((race, i) => (

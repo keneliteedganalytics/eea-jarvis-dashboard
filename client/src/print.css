@@ -34,6 +34,23 @@
   break-inside: avoid;
 }
 
+/* Workout glyph key — sits under the card meta, prints with the header. Emoji
+   are text glyphs so they survive the @media print svg/img hide rule. */
+.workout-key {
+  font-size: 9pt;
+  color: #222;
+  margin-top: 4px;
+}
+.workout-key .label {
+  font-weight: 700;
+  font-size: 8pt;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #333;
+  display: block;
+  margin-bottom: 1px;
+}
+
 .print-race {
   border: 1px solid #999;
   border-radius: 4px;
