@@ -31,6 +31,7 @@ function AppRouter() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/review/:id" component={Review} />
+      <Route path="/race/:cardId/:n" component={RaceDetail} />
       <Route path="/race/:n" component={RaceDetail} />
       <Route path="/results" component={Results} />
       <Route path="/analytics" component={Analytics} />

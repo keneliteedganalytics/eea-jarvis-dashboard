@@ -350,7 +350,7 @@ export default function Home() {
       {/* Race rows */}
       <div className="mt-4 space-y-3">
         {card.races.map((race) => (
-          <RaceRow key={race.id} race={race} />
+          <RaceRow key={race.id} race={race} cardId={card.id} />
         ))}
       </div>
     </div>
