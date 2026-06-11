@@ -9,7 +9,13 @@ import { RaceRow } from "@/components/RaceRow";
 import { useJarvis } from "@/lib/jarvis";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Mic, Lock, Check, RefreshCw, Printer } from "lucide-react";
+import { Mic, Lock, Check, RefreshCw, Printer, ChevronDown } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { HostHero } from "@/components/brand/HostHero";
 import { TrackRecordHero } from "@/components/TrackRecordHero";
@@ -193,14 +199,40 @@ export default function Home() {
             >
               <Mic className="h-4 w-4 mr-1.5 shrink-0" /> BRIEF ME ON THE CARD
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => window.open("#/print", "_blank")}
-              className="border-gold/30 text-gold hover:bg-gold/10"
-              data-testid="button-print-picks"
-            >
-              <Printer className="h-4 w-4 mr-1.5 shrink-0" /> Print Picks
-            </Button>
+            {todaysCards.length > 1 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="border-gold/30 text-gold hover:bg-gold/10"
+                    data-testid="button-print-picks"
+                  >
+                    <Printer className="h-4 w-4 mr-1.5 shrink-0" /> Print Picks
+                    <ChevronDown className="h-4 w-4 ml-1.5 shrink-0" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {todaysCards.map((c) => (
+                    <DropdownMenuItem
+                      key={c.id}
+                      onClick={() => window.open(`#/print/${c.id}`, "_blank")}
+                      data-testid={`print-card-${c.id}`}
+                    >
+                      {c.track}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <Button
+                variant="outline"
+                onClick={() => window.open("#/print", "_blank")}
+                className="border-gold/30 text-gold hover:bg-gold/10"
+                data-testid="button-print-picks"
+              >
+                <Printer className="h-4 w-4 mr-1.5 shrink-0" /> Print Picks
+              </Button>
+            )}
             <Button
               variant="outline"
               onClick={() => fetchNowMutation.mutate()}
