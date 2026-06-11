@@ -74,7 +74,14 @@ function PickEditor({ race, locked }: { race: RaceWithResult; locked: boolean })
       await apiRequest("PATCH", `/api/races/${race.id}`, { whyText: why, paceText: pace });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] });
+      // Invalidate both /api/cards/latest and any /api/cards/:id keys so that
+      // RaceDetail (either route) and Home refetch after a save.
+      queryClient.invalidateQueries({
+        predicate: (q) => {
+          const k = q.queryKey[0];
+          return typeof k === "string" && k.startsWith("/api/cards");
+        },
+      });
       toast({ title: "Saved", description: `Notes for Race ${race.raceNumber} saved.` });
     },
   });
@@ -95,7 +102,12 @@ function PickEditor({ race, locked }: { race: RaceWithResult; locked: boolean })
       await apiRequest("POST", `/api/races/${race.id}/scratch`, vars);
     },
     onSuccess: (_d, vars) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] });
+      queryClient.invalidateQueries({
+        predicate: (q) => {
+          const k = q.queryKey[0];
+          return typeof k === "string" && k.startsWith("/api/cards");
+        },
+      });
       toast({
         title: vars.scratched ? "Horse scratched" : "Horse reinstated",
         description: `Race ${race.raceNumber} re-tiered · #${vars.pgm}.`,
@@ -223,9 +235,20 @@ function RetierHistory({ race }: { race: RaceWithResult }) {
 }
 
 export default function RaceDetail() {
-  const params = useParams();
+  const params = useParams<{ cardId?: string; n?: string }>();
   const n = parseInt(params.n ?? "1", 10);
-  const { data: card, isLoading } = useQuery<CardWithRaces>({ queryKey: ["/api/cards/latest"] });
+
+  // Two-route support: /race/:cardId/:n scopes to a specific card (so multi-track
+  // days resolve to the right one). The legacy /race/:n falls back to latest.
+  const explicitCardId = params.cardId ? parseInt(params.cardId, 10) : undefined;
+  const cardKey = explicitCardId
+    ? [`/api/cards/${explicitCardId}`]
+    : ["/api/cards/latest"];
+  const { data: card, isLoading } = useQuery<CardWithRaces>({
+    queryKey: cardKey,
+    refetchInterval: 15 * 60 * 1000,
+    staleTime: 0,
+  });
   const jarvis = useJarvis();
 
   if (isLoading || !card) {

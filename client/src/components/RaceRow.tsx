@@ -39,7 +39,20 @@ function ResultStrip({ race }: { race: RaceWithResult }) {
 // Historical card detail. When `readOnly` is set the per-race Jarvis brief
 // button is hidden and the race-detail links are inert (archived cards have no
 // live /race/:n route).
-export function RaceRow({ race, readOnly = false }: { race: RaceWithResult; readOnly?: boolean }) {
+export function RaceRow({
+  race,
+  cardId,
+  readOnly = false,
+}: {
+  race: RaceWithResult;
+  /**
+   * The owning card id. When provided, the race-detail link is scoped to this
+   * specific card (/race/:cardId/:n) so multi-track days resolve to the right
+   * race instead of always falling through to the backend's "latest" card.
+   */
+  cardId?: number;
+  readOnly?: boolean;
+}) {
   const cfg = tierOf(race.tier);
   const jarvis = useJarvis();
   const { toast } = useToast();
@@ -83,7 +96,10 @@ export function RaceRow({ race, readOnly = false }: { race: RaceWithResult; read
     readOnly ? (
       <div className={className}>{children}</div>
     ) : (
-      <Link href={`/race/${race.raceNumber}`} className={className}>
+      <Link
+        href={cardId ? `/race/${cardId}/${race.raceNumber}` : `/race/${race.raceNumber}`}
+        className={className}
+      >
         {children}
       </Link>
     );
