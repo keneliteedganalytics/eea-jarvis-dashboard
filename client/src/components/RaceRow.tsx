@@ -5,6 +5,7 @@ import { TierPill } from "@/components/brand/TierPill";
 import { WeatherChip } from "@/components/WeatherChip";
 import { PickCell } from "@/components/PickCell";
 import { tierOf } from "@/lib/tiers";
+import { parseFlags } from "@/lib/parseFlags";
 import { useJarvis } from "@/lib/jarvis";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -42,7 +43,7 @@ export function RaceRow({ race, readOnly = false }: { race: RaceWithResult; read
   const cfg = tierOf(race.tier);
   const jarvis = useJarvis();
   const { toast } = useToast();
-  const flags = JSON.parse(race.flags || "[]") as string[];
+  const flags = parseFlags(race.flags);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] });
