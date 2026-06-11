@@ -8,6 +8,7 @@ import {
   resultSubmitSchema,
   payoutsSubmitSchema,
   updateRaceTextSchema,
+  updateRacePicksSchema,
   insertSettingsSchema,
   updatePredictionSchema,
 } from "@shared/schema";
@@ -552,6 +553,31 @@ export async function registerRoutes(
     }
     try {
       storage.reTier(raceId);
+      res.json(storage.getCardWithRaces(race.cardId));
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
+  // ── Edit picks: operator override on any subset of pick slots ────────────
+  // Like swap-picks but for direct slot edits (e.g. mid-card tote-board sharp
+  // money rearranges place/show). All pick fields optional — only patches what
+  // is provided. Does NOT touch tier, scratch state, or whyText/paceText. Records
+  // a MANUAL_OVERRIDE race_event with kind=EDIT_PICKS. Returns the refreshed card.
+  app.patch("/api/races/:id/picks", (req, res) => {
+    const raceId = Number(req.params.id);
+    const parsed = updateRacePicksSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+    const race = storage.getRace(raceId);
+    if (!race) return res.status(404).json({ error: "Race not found" });
+    const lockedCard = storage.getCard(race.cardId);
+    if (lockedCard?.status === "completed") {
+      return res.status(409).json({ error: "Card is completed (read-only). Unlock it in Settings to edit." });
+    }
+    try {
+      storage.updateRacePicks(raceId, parsed.data);
       res.json(storage.getCardWithRaces(race.cardId));
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });

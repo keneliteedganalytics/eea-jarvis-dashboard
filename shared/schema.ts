@@ -809,6 +809,25 @@ export const updateRaceTextSchema = z.object({
   paceText: z.string().optional(),
 });
 
+// Operator override: rewrite some or all of the four pick slots on a race
+// without changing tier, scratch state, predictions, or the bet ledger inputs.
+// All fields optional — only patch what's provided.
+export const updateRacePicksSchema = z.object({
+  winPgm: z.string().optional(),
+  winName: z.string().optional(),
+  winScore: z.number().optional(),
+  placePgm: z.string().optional(),
+  placeName: z.string().optional(),
+  placeScore: z.number().optional(),
+  showPgm: z.string().optional(),
+  showName: z.string().optional(),
+  showScore: z.number().optional(),
+  fourthPgm: z.string().optional(),
+  fourthName: z.string().optional(),
+  fourthScore: z.number().optional(),
+  reason: z.string().optional(),
+});
+
 // ── Types ─────────────────────────────────────────────────────────────────
 export type Card = typeof cards.$inferSelect;
 export type InsertCard = z.infer<typeof insertCardSchema>;

@@ -132,6 +132,13 @@ export interface IStorage {
 
   // Manual win-pick swap (wet-track overlay PR)
   swapWinPick(raceId: number, newWinPgm: string, reason?: string): Race | undefined;
+  updateRacePicks(raceId: number, partial: {
+    winPgm?: string; winName?: string; winScore?: number;
+    placePgm?: string; placeName?: string; placeScore?: number;
+    showPgm?: string; showName?: string; showScore?: number;
+    fourthPgm?: string; fourthName?: string; fourthScore?: number;
+    reason?: string;
+  }): Race | undefined;
 
   // Card completion (PR #41)
   completeCard(cardId: number): CardSummaryRow | undefined;
@@ -1098,6 +1105,65 @@ export class DatabaseStorage implements IStorage {
         payloadJson: JSON.stringify({
           newWinPgm: pgm,
           reason: reason ?? null,
+          overriddenAt: new Date().toISOString(),
+          oldPicks,
+          newPicks: {
+            win: fresh.winPgm, place: fresh.placePgm, show: fresh.showPgm, fourth: fresh.fourthPgm,
+          },
+        }),
+      })
+      .run();
+    return fresh;
+  }
+
+  // Operator override: rewrite specific pick slots on a race. Unlike swapWinPick
+  // (which promotes-and-cascades a single horse to win), this lets the operator
+  // set any subset of {win, place, show, fourth} directly — used for mid-card
+  // tote-board adjustments where sharp money rearranges the place/show order.
+  // Records a MANUAL_OVERRIDE race_event capturing old vs new picks + reason.
+  updateRacePicks(
+    raceId: number,
+    partial: {
+      winPgm?: string; winName?: string; winScore?: number;
+      placePgm?: string; placeName?: string; placeScore?: number;
+      showPgm?: string; showName?: string; showScore?: number;
+      fourthPgm?: string; fourthName?: string; fourthScore?: number;
+      reason?: string;
+    },
+  ): Race | undefined {
+    const race = this.getRace(raceId);
+    if (!race) return undefined;
+
+    const oldPicks = {
+      win: race.winPgm, place: race.placePgm, show: race.showPgm, fourth: race.fourthPgm,
+    };
+
+    const patch: Partial<Race> = {};
+    if (partial.winPgm !== undefined) patch.winPgm = partial.winPgm || null;
+    if (partial.winName !== undefined) patch.winName = partial.winName || null;
+    if (partial.winScore !== undefined) patch.winScore = partial.winScore;
+    if (partial.placePgm !== undefined) patch.placePgm = partial.placePgm || null;
+    if (partial.placeName !== undefined) patch.placeName = partial.placeName || null;
+    if (partial.placeScore !== undefined) patch.placeScore = partial.placeScore;
+    if (partial.showPgm !== undefined) patch.showPgm = partial.showPgm || null;
+    if (partial.showName !== undefined) patch.showName = partial.showName || null;
+    if (partial.showScore !== undefined) patch.showScore = partial.showScore;
+    if (partial.fourthPgm !== undefined) patch.fourthPgm = partial.fourthPgm || null;
+    if (partial.fourthName !== undefined) patch.fourthName = partial.fourthName || null;
+    if (partial.fourthScore !== undefined) patch.fourthScore = partial.fourthScore;
+
+    if (Object.keys(patch).length === 0) return race;
+
+    db.update(races).set(patch).where(eq(races.id, raceId)).run();
+    const fresh = this.getRace(raceId)!;
+
+    db.insert(raceEvents)
+      .values({
+        raceId,
+        type: "MANUAL_OVERRIDE",
+        payloadJson: JSON.stringify({
+          kind: "EDIT_PICKS",
+          reason: partial.reason ?? null,
           overriddenAt: new Date().toISOString(),
           oldPicks,
           newPicks: {
