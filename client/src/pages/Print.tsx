@@ -165,15 +165,23 @@ export default function Print() {
   const [, params] = useRoute("/print/:id");
   const explicitId = params?.id ? Number(params.id) : undefined;
 
+  // Auto-refresh print payload every 15 minutes so any pick revisions pushed from
+  // chat get reflected without manual reload during live race hours.
+  const REFRESH_MS = 15 * 60 * 1000;
+
   const { data: latest } = useQuery<{ id: number }>({
     queryKey: ["/api/cards/latest"],
     enabled: explicitId == null,
+    refetchInterval: REFRESH_MS,
+    staleTime: 0,
   });
   const cardId = explicitId ?? latest?.id;
 
   const { data: card, isLoading } = useQuery<PrintCard>({
     queryKey: [`/api/cards/${cardId}/print`],
     enabled: !!cardId,
+    refetchInterval: REFRESH_MS,
+    staleTime: 0,
   });
 
   const races = card?.races ?? [];

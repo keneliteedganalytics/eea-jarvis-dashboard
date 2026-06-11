@@ -100,13 +100,25 @@ export default function Home() {
   // a specific card; undefined means "show the latest card" (default behavior).
   const [selectedCardId, setSelectedCardId] = useState<number | undefined>(undefined);
 
-  const { data: activeCards = [] } = useQuery<CardListItem[]>({ queryKey: ["/api/cards"] });
+  // Auto-refresh card data every 15 minutes during live race hours so picks,
+  // tiers, and any in-chat revisions get pushed to the page without a manual reload.
+  const REFRESH_MS = 15 * 60 * 1000;
+
+  const { data: activeCards = [] } = useQuery<CardListItem[]>({
+    queryKey: ["/api/cards"],
+    refetchInterval: REFRESH_MS,
+    staleTime: 0,
+  });
   const today = boiseToday();
   const todaysCards = activeCards.filter((c) => c.status === "active" && c.date === today);
   const showSwitcher = todaysCards.length > 1;
 
   const activeCardKey = selectedCardId ? ["/api/cards", selectedCardId] : ["/api/cards/latest"];
-  const { data: card, isLoading } = useQuery<CardWithRaces>({ queryKey: activeCardKey });
+  const { data: card, isLoading } = useQuery<CardWithRaces>({
+    queryKey: activeCardKey,
+    refetchInterval: REFRESH_MS,
+    staleTime: 0,
+  });
   const jarvis = useJarvis();
   const { toast } = useToast();
 
