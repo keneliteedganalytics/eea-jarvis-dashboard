@@ -6,6 +6,7 @@ import {
 } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { ExpertComparisonHeader } from "@/components/ExpertComparisonHeader";
 
 type Scope = "today" | "track" | "lifetime";
 
@@ -583,6 +584,19 @@ interface BookBetsPage {
   bets: BookBetRow[];
 }
 
+interface ExpertPickApiRow {
+  id: number;
+  track: string;
+  date: string;
+  race: number;
+  source: string;
+  sourceHandicapper: string;
+  topPick: number;
+  picks24: string; // JSON array string
+  result: string | null;
+  winner: number | null;
+}
+
 function pnlColor(n: number): string {
   return n >= 0 ? "text-win" : "text-loss";
 }
@@ -738,6 +752,90 @@ function BookRecentBets({ rows }: { rows: BookBetRow[] }) {
   );
 }
 
+// By-Race drill-down: our book result for a race alongside the expert's pick.
+// Rows where we won and the expert's pick lost (or vice versa) are highlighted.
+function BookByRace({ bets, date }: { bets: BookBetRow[]; date?: string }) {
+  const { data: experts = [] } = useQuery<ExpertPickApiRow[]>({
+    queryKey: [date ? `/api/expert-picks?date=${date}` : "/api/expert-picks"],
+  });
+
+  // Index expert rows by track|race (prefer a graded row; first one otherwise).
+  const expertByRace = new Map<string, ExpertPickApiRow>();
+  for (const e of experts) {
+    const k = `${e.track}|${e.race}`;
+    const existing = expertByRace.get(k);
+    if (!existing || (e.result && !existing.result)) expertByRace.set(k, e);
+  }
+
+  // One row per (track, race) we have a book bet on, most recent first.
+  const seen = new Set<string>();
+  const rows = bets
+    .filter((b) => {
+      const k = `${b.track}|${b.race}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
+    .map((b) => {
+      const e = expertByRace.get(`${b.track}|${b.race}`);
+      const ourWon = b.result === "WIN";
+      const expertWon = e?.result === "WIN";
+      const divergent = e?.result != null && ourWon !== expertWon;
+      return { b, e, ourWon, expertWon, divergent };
+    });
+
+  if (rows.length === 0) return null;
+
+  const resultClass = (r: string | null) =>
+    r === "WIN" ? "text-win" : r === "OUT" || r === "LOSS" ? "text-loss" : "text-muted-brand";
+
+  return (
+    <div className="rounded-lg border border-gold/10 bg-navy-card p-4">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-3">
+        By Race · EEA vs Expert
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-muted-brand uppercase tracking-[0.1em]">
+            <tr>
+              <th className="text-left py-2">Race</th>
+              <th className="text-left py-2">Our Pick</th>
+              <th className="text-right py-2">Result</th>
+              <th className="text-left py-2">Expert Pick</th>
+              <th className="text-left py-2">Expert Source</th>
+              <th className="text-right py-2">Winner</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ b, e, divergent }) => (
+              <tr
+                key={`${b.track}-${b.race}`}
+                className={`border-t border-gold/5 text-silver ${divergent ? "bg-gold/[0.06]" : ""}`}
+                data-testid={`byrace-${b.track}-${b.race}`}
+              >
+                <td className="py-2 font-display font-bold whitespace-nowrap">
+                  {b.track} R{b.race}
+                </td>
+                <td className="py-2 tabular-nums text-muted-brand">{b.wagerDesc}</td>
+                <td className={`py-2 text-right tabular-nums font-bold ${resultClass(b.result)}`}>
+                  {b.result}
+                </td>
+                <td className="py-2 tabular-nums">{e ? `#${e.topPick}` : "—"}</td>
+                <td className="py-2 text-muted-brand whitespace-nowrap">
+                  {e?.sourceHandicapper ?? "—"}
+                </td>
+                <td className="py-2 text-right tabular-nums">
+                  {e?.winner != null ? `#${e.winner}` : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function BookBets() {
   const { data: summary } = useQuery<BookSummary>({ queryKey: ["/api/analytics/book/summary"] });
   const { data: byTrack = [] } = useQuery<BookGroupRow[]>({ queryKey: ["/api/analytics/book/by-track"] });
@@ -823,6 +921,7 @@ function BookBets() {
       </div>
 
       <BookMatrix cells={matrix} />
+      <BookByRace bets={betsPage?.bets ?? []} />
       <BookRecentBets rows={betsPage?.bets ?? []} />
     </div>
   );
@@ -983,6 +1082,9 @@ export default function Analytics() {
   return (
     <div className="p-4 sm:p-6 max-w-[1400px] mx-auto pb-28">
       <h1 className="text-xl font-display font-black text-silver">Trends &amp; Analytics</h1>
+      <div className="mt-3">
+        <ExpertComparisonHeader track="ALL" />
+      </div>
       <Tabs defaultValue="jarvis" className="mt-3">
         <TabsList className="bg-navy-card border border-gold/15">
           <TabsTrigger
