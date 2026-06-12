@@ -72,8 +72,10 @@ import {
   recordOutcomes,
   listSnapshots,
   computeRoi,
+  getSnapshot,
   DEFAULT_METHODOLOGY_VERSION,
 } from "./services/backtest";
+import { gradeCard, V4_VERSION, V4_WEIGHTS } from "./services/v4_rating";
 import { snapshotSubmitSchema, outcomesSubmitSchema } from "@shared/schema";
 import { realBetsBulkUpsertSchema } from "@shared/schema";
 
@@ -187,6 +189,39 @@ export async function registerRoutes(
     const card = storage.getCardWithRaces(id);
     if (!card) return res.status(404).json({ error: "Card not found" });
     res.json(card);
+  });
+
+  // v4 rating (LOCKED v4-lock-2026-06-12). Grades a card with the v4 composite
+  // + tier engine. The dashboard's DB race rows carry no per-horse feature
+  // columns, so we grade the frozen score-time snapshot's rawData when present
+  // (Belmont/Churchill/evaluated card_data shapes); otherwise we fall back to
+  // the card itself, where feature-less races stamp PASS rather than throw.
+  app.get("/api/cards/:id/v4-grades", (req, res) => {
+    const id = Number(req.params.id);
+    const card = storage.getCardWithRaces(id);
+    if (!card) return res.status(404).json({ error: "Card not found" });
+    try {
+      const snap = getSnapshot(id);
+      let source: unknown = card;
+      if (snap) {
+        try {
+          const raw = JSON.parse(snap.rawData) as { races?: unknown[] };
+          if (raw && Array.isArray(raw.races) && raw.races.length > 0) source = raw;
+        } catch {
+          /* fall back to the card shape */
+        }
+      }
+      const grades = gradeCard(source);
+      res.json({
+        version: V4_VERSION,
+        weights: V4_WEIGHTS,
+        track: card.track,
+        date: card.date,
+        grades,
+      });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
   });
 
   // Create a card. Body: { card: InsertCard, races: Omit<InsertRace,"cardId">[],

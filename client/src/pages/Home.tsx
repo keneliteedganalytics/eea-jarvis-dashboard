@@ -6,6 +6,7 @@ import { ScopeLogo } from "@/components/brand/ScopeLogo";
 import { Wordmark } from "@/components/brand/Wordmark";
 import { TierPill, Pill } from "@/components/brand/TierPill";
 import { RaceRow } from "@/components/RaceRow";
+import type { V4Grade } from "@/components/V4TierBadge";
 import { useJarvis } from "@/lib/jarvis";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -119,6 +120,20 @@ export default function Home() {
     refetchInterval: REFRESH_MS,
     staleTime: 0,
   });
+
+  // v4 (v4-lock-2026-06-12) grades for the resolved card. Fetched once at the
+  // card level and keyed by race number for the per-race tier badge. v4 runs
+  // standalone alongside the existing v3.1 tiers — see docs/handicapping-engine/v4.
+  const { data: v4 } = useQuery<{ grades: V4Grade[] }>({
+    queryKey: card ? ["/api/cards", card.id, "v4-grades"] : ["/api/cards", "none", "v4-grades"],
+    enabled: !!card,
+    refetchInterval: REFRESH_MS,
+    staleTime: 0,
+  });
+  const v4ByRace = new Map<number, V4Grade>(
+    (v4?.grades ?? []).map((g) => [Number(g.race), g]),
+  );
+
   const jarvis = useJarvis();
   const { toast } = useToast();
 
@@ -350,7 +365,7 @@ export default function Home() {
       {/* Race rows */}
       <div className="mt-4 space-y-3">
         {card.races.map((race) => (
-          <RaceRow key={race.id} race={race} cardId={card.id} />
+          <RaceRow key={race.id} race={race} cardId={card.id} v4Grade={v4ByRace.get(race.raceNumber)} />
         ))}
       </div>
     </div>
