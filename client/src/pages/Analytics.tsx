@@ -5,6 +5,7 @@ import {
   ResponsiveContainer, Legend, Cell,
 } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 type Scope = "today" | "track" | "lifetime";
 
@@ -540,7 +541,294 @@ function Pr42Sections({ data }: { data: Pr42Analytics }) {
   );
 }
 
-export default function Analytics() {
+// ── Book Bets (real sportsbook bets) ──────────────────────────────────────
+interface BookSummary {
+  totalBets: number;
+  totalCost: number;
+  totalPayout: number;
+  totalPnl: number;
+  roi: number;
+  winPct: number;
+}
+interface BookGroupRow extends BookSummary {
+  track?: string;
+  betType?: string;
+}
+interface BookCurvePoint {
+  placedAt: string;
+  cumulativePnl: number;
+}
+interface BookBetRow {
+  id: number;
+  betId: string;
+  placedAt: string;
+  date: string;
+  track: string;
+  race: number;
+  betType: string;
+  betSubtype: string | null;
+  wagerDesc: string;
+  baseAmount: number;
+  totalCost: number;
+  payout: number;
+  result: string;
+  source: string;
+  pnl: number;
+  roi: number;
+}
+interface BookBetsPage {
+  total: number;
+  limit: number;
+  offset: number;
+  bets: BookBetRow[];
+}
+
+function pnlColor(n: number): string {
+  return n >= 0 ? "text-win" : "text-loss";
+}
+
+function BookKpiCard({ label, value, tone }: { label: string; value: string; tone?: "win" | "loss" | "neutral" }) {
+  const valueColor = tone === "win" ? "text-win" : tone === "loss" ? "text-loss" : "text-gold-light";
+  return (
+    <div className="rounded-lg border border-gold/15 bg-navy-card p-4">
+      <div className={`text-2xl font-display font-black tabular-nums ${valueColor}`}>{value}</div>
+      <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-muted-brand">{label}</div>
+    </div>
+  );
+}
+
+// Color-grade an ROI% for the heatmap cell background.
+function roiHeatStyle(roi: number | null, legs: number): React.CSSProperties {
+  if (legs <= 0 || roi == null) return { background: "transparent" };
+  const clamped = Math.max(-100, Math.min(100, roi));
+  const alpha = Math.min(0.4, 0.08 + (Math.abs(clamped) / 100) * 0.32);
+  const rgb = roi >= 0 ? "74,222,128" : "239,68,68";
+  return { background: `rgba(${rgb},${alpha})` };
+}
+
+function BookGroupTable({ title, label, rows }: { title: string; label: string; rows: BookGroupRow[] }) {
+  return (
+    <div className="rounded-lg border border-gold/10 bg-navy-card p-4">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-3">{title}</div>
+      {rows.length === 0 ? (
+        <div className="text-xs text-muted-brand">No bets in this range yet.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-muted-brand uppercase tracking-[0.1em]">
+              <tr>
+                <th className="text-left py-2">{label}</th>
+                <th className="text-right py-2">Bets</th>
+                <th className="text-right py-2">Cost</th>
+                <th className="text-right py-2">Payout</th>
+                <th className="text-right py-2">P/L</th>
+                <th className="text-right py-2">ROI</th>
+                <th className="text-right py-2">Win%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const key = r.track ?? r.betType ?? "";
+                return (
+                  <tr key={key} className="border-t border-gold/5 text-silver" data-testid={`book-group-${key.toLowerCase().replace(/\s+/g, "-")}`}>
+                    <td className="py-2 font-display font-bold">{key}</td>
+                    <td className="py-2 text-right tabular-nums">{r.totalBets}</td>
+                    <td className="py-2 text-right tabular-nums">{fmtMoney(r.totalCost)}</td>
+                    <td className="py-2 text-right tabular-nums">{fmtMoney(r.totalPayout)}</td>
+                    <td className={`py-2 text-right tabular-nums font-bold ${pnlColor(r.totalPnl)}`}>{fmtMoney(r.totalPnl)}</td>
+                    <td className={`py-2 text-right tabular-nums ${roiColor(r.roi)}`}>{fmtRoi(r.roi)}</td>
+                    <td className="py-2 text-right tabular-nums">{r.winPct}%</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BookMatrix({ cells }: { cells: BookGroupRow[] }) {
+  const tracks = Array.from(new Set(cells.map((c) => c.track!)));
+  const types = Array.from(new Set(cells.map((c) => c.betType!)));
+  const lookup = new Map(cells.map((c) => [`${c.track}|${c.betType}`, c]));
+  return (
+    <div className="rounded-lg border border-gold/10 bg-navy-card p-4">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-3">Track × Bet Type ROI</div>
+      {cells.length === 0 ? (
+        <div className="text-xs text-muted-brand">No bets in this range yet.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-muted-brand uppercase tracking-[0.1em]">
+              <tr>
+                <th className="text-left py-2 pr-3">Track</th>
+                {types.map((t) => <th key={t} className="text-right py-2 px-2">{t}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {tracks.map((tr) => (
+                <tr key={tr} className="border-t border-gold/5">
+                  <td className="py-2 pr-3 font-display font-bold text-silver whitespace-nowrap">{tr}</td>
+                  {types.map((ty) => {
+                    const c = lookup.get(`${tr}|${ty}`);
+                    return (
+                      <td
+                        key={ty}
+                        className={`py-2 px-2 text-right tabular-nums ${c ? roiColor(c.roi) : "text-muted-brand"}`}
+                        style={roiHeatStyle(c ? c.roi : null, c ? c.totalBets : 0)}
+                        data-testid={`book-matrix-${tr.toLowerCase().replace(/\s+/g, "-")}-${ty}`}
+                      >
+                        {c ? fmtRoi(c.roi) : "·"}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BookRecentBets({ rows }: { rows: BookBetRow[] }) {
+  const resultClass = (r: string) =>
+    r === "WIN" ? "text-win" : r === "LOSS" ? "text-loss" : "text-muted-brand";
+  return (
+    <div className="rounded-lg border border-gold/10 bg-navy-card p-4">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold mb-3">Recent Bets</div>
+      {rows.length === 0 ? (
+        <div className="text-xs text-muted-brand">No bets ingested yet. Run the seed script or POST to /api/real-bets/bulk-upsert.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-muted-brand uppercase tracking-[0.1em]">
+              <tr>
+                <th className="text-left py-2">Time</th>
+                <th className="text-left py-2">Track</th>
+                <th className="text-right py-2">Race</th>
+                <th className="text-left py-2">Type</th>
+                <th className="text-left py-2">Wager</th>
+                <th className="text-right py-2">Cost</th>
+                <th className="text-right py-2">Payout</th>
+                <th className="text-right py-2">Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((b) => (
+                <tr key={b.id} className="border-t border-gold/5 text-silver" data-testid={`book-bet-${b.betId}`}>
+                  <td className="py-2 tabular-nums text-muted-brand whitespace-nowrap">{b.placedAt.replace("T", " ").slice(0, 16)}</td>
+                  <td className="py-2 font-display font-bold whitespace-nowrap">{b.track}</td>
+                  <td className="py-2 text-right tabular-nums">{b.race}</td>
+                  <td className="py-2"><span className="rounded bg-gold/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gold font-display font-bold">{b.betType}</span></td>
+                  <td className="py-2 text-muted-brand">{b.wagerDesc}</td>
+                  <td className="py-2 text-right tabular-nums">{fmtMoney(b.totalCost)}</td>
+                  <td className="py-2 text-right tabular-nums">{fmtMoney(b.payout)}</td>
+                  <td className={`py-2 text-right tabular-nums font-bold ${resultClass(b.result)}`}>{b.result}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BookBets() {
+  const { data: summary } = useQuery<BookSummary>({ queryKey: ["/api/analytics/book/summary"] });
+  const { data: byTrack = [] } = useQuery<BookGroupRow[]>({ queryKey: ["/api/analytics/book/by-track"] });
+  const { data: byType = [] } = useQuery<BookGroupRow[]>({ queryKey: ["/api/analytics/book/by-bet-type"] });
+  const { data: matrix = [] } = useQuery<BookGroupRow[]>({ queryKey: ["/api/analytics/book/by-track-and-type"] });
+  const { data: curve = [] } = useQuery<BookCurvePoint[]>({ queryKey: ["/api/analytics/book/bankroll-curve"] });
+  const { data: betsPage } = useQuery<BookBetsPage>({ queryKey: ["/api/analytics/book/bets?limit=50"] });
+
+  if (!summary) {
+    return (
+      <div className="mt-4 grid sm:grid-cols-2 gap-4">
+        {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-40 w-full" />)}
+      </div>
+    );
+  }
+
+  if (summary.totalBets === 0) {
+    return (
+      <div className="mt-6 rounded-lg border border-gold/10 bg-navy-card p-6 text-center">
+        <div className="text-sm text-muted-brand">No book bets ingested yet.</div>
+        <div className="mt-1 text-[11px] text-muted-brand">Run <code className="text-gold-dark">npx tsx scripts/seed_real_bets.ts</code> to load Ken's placed bets.</div>
+      </div>
+    );
+  }
+
+  const curveData = curve.map((p) => ({ label: p.placedAt.slice(5, 10), cumulative: p.cumulativePnl }));
+
+  return (
+    <div className="mt-4 space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+        <BookKpiCard label="Total Wagered" value={fmtMoney(summary.totalCost)} />
+        <BookKpiCard label="Total Payout" value={fmtMoney(summary.totalPayout)} />
+        <BookKpiCard label="P / L" value={fmtMoney(summary.totalPnl)} tone={summary.totalPnl >= 0 ? "win" : "loss"} />
+        <BookKpiCard label="ROI" value={fmtRoi(summary.roi)} tone={summary.roi >= 0 ? "win" : "loss"} />
+        <BookKpiCard label="Win %" value={`${summary.winPct}%`} />
+        <BookKpiCard label="Bet Count" value={String(summary.totalBets)} />
+      </div>
+
+      <ChartCard title="Bankroll Curve · Cumulative P/L">
+        <ResponsiveContainer>
+          <LineChart data={curveData} margin={{ top: 4, right: 8, left: -8, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(108,122,153,0.15)" />
+            <XAxis dataKey="label" tick={{ fill: SLATE, fontSize: 11 }} minTickGap={24} />
+            <YAxis tick={{ fill: SLATE, fontSize: 11 }} />
+            <Tooltip contentStyle={tooltipStyle} />
+            <Line type="monotone" dataKey="cumulative" name="Cumulative P/L ($)" stroke={GOLD_LIGHT} strokeWidth={2} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ChartCard title="P/L by Track">
+          <ResponsiveContainer>
+            <BarChart data={byTrack} margin={{ top: 4, right: 8, left: -8, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(108,122,153,0.15)" />
+              <XAxis dataKey="track" tick={{ fill: SLATE, fontSize: 9 }} interval={0} angle={-20} textAnchor="end" height={60} />
+              <YAxis tick={{ fill: SLATE, fontSize: 11 }} />
+              <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "rgba(201,162,39,0.06)" }} />
+              <Bar dataKey="totalPnl" name="P/L ($)" radius={[3, 3, 0, 0]}>
+                {byTrack.map((r, i) => <Cell key={i} fill={r.totalPnl >= 0 ? WIN : LOSS} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+        <ChartCard title="P/L by Bet Type">
+          <ResponsiveContainer>
+            <BarChart data={byType} margin={{ top: 4, right: 8, left: -8, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(108,122,153,0.15)" />
+              <XAxis dataKey="betType" tick={{ fill: SLATE, fontSize: 10 }} interval={0} />
+              <YAxis tick={{ fill: SLATE, fontSize: 11 }} />
+              <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "rgba(201,162,39,0.06)" }} />
+              <Bar dataKey="totalPnl" name="P/L ($)" radius={[3, 3, 0, 0]}>
+                {byType.map((r, i) => <Cell key={i} fill={r.totalPnl >= 0 ? WIN : LOSS} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <BookGroupTable title="ROI by Track" label="Track" rows={byTrack} />
+        <BookGroupTable title="ROI by Bet Type" label="Bet Type" rows={byType} />
+      </div>
+
+      <BookMatrix cells={matrix} />
+      <BookRecentBets rows={betsPage?.bets ?? []} />
+    </div>
+  );
+}
+
+function JarvisPicks() {
   const [scope, setScope] = useState<Scope>("today");
   const [selectedTrack, setSelectedTrack] = useState<string | null>(null);
   const [todaySubTrack, setTodaySubTrack] = useState<string | null>(null);
@@ -631,14 +919,12 @@ export default function Analytics() {
   }, [scope, todayCards, todaySubTrack, selectedTrack]);
 
   return (
-    <div className="p-4 sm:p-6 max-w-[1400px] mx-auto pb-28">
+    <div>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <h1 className="text-xl font-display font-black text-silver">Trends &amp; Analytics</h1>
+        <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold">
+          Showing: {scopeLabel}
+        </div>
         <ScopeTabs value={scope} onChange={setScope} />
-      </div>
-
-      <div className="mt-3 text-[10px] uppercase tracking-[0.18em] text-gold-dark font-display font-bold">
-        Showing: {scopeLabel}
       </div>
 
       {scope === "today" && todayCards.length === 0 && (
@@ -689,6 +975,38 @@ export default function Analytics() {
       )}
 
       {scope === "lifetime" && lifetime && <ByTrackTable rows={lifetime.byTrack} />}
+    </div>
+  );
+}
+
+export default function Analytics() {
+  return (
+    <div className="p-4 sm:p-6 max-w-[1400px] mx-auto pb-28">
+      <h1 className="text-xl font-display font-black text-silver">Trends &amp; Analytics</h1>
+      <Tabs defaultValue="jarvis" className="mt-3">
+        <TabsList className="bg-navy-card border border-gold/15">
+          <TabsTrigger
+            value="jarvis"
+            className="data-[state=active]:bg-gold/15 data-[state=active]:text-gold-light text-muted-brand uppercase tracking-[0.12em] text-[11px] font-display font-bold"
+            data-testid="tab-jarvis-picks"
+          >
+            Jarvis Picks
+          </TabsTrigger>
+          <TabsTrigger
+            value="book"
+            className="data-[state=active]:bg-gold/15 data-[state=active]:text-gold-light text-muted-brand uppercase tracking-[0.12em] text-[11px] font-display font-bold"
+            data-testid="tab-book-bets"
+          >
+            Book Bets
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="jarvis">
+          <JarvisPicks />
+        </TabsContent>
+        <TabsContent value="book">
+          <BookBets />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

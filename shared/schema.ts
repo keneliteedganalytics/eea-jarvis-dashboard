@@ -194,6 +194,58 @@ export const bankrollEvents = sqliteTable("bankroll_events", {
 
 export type BankrollEventRow = typeof bankrollEvents.$inferSelect;
 
+// ── Real (sportsbook) bets — Book Bets analytics ──────────────────────────
+// Ken's ACTUAL placed bets (XBNet + Churchill book dump), independent of the
+// Jarvis-generated bet_legs ledger. This is real money with real outcomes, so
+// the Book Bets tab computes ROI/win% straight off these rows. bet_id is the
+// book's own identifier and is UNIQUE — ingestion upserts on it so a re-dump is
+// idempotent. payout is the gross return (0 on a loss; original stake on a
+// refund); pnl is derived (payout − total_cost). result ∈ WIN|LOSS|REFUND.
+export const realBets = sqliteTable("real_bets", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  betId: text("bet_id").notNull().unique(),
+  placedAt: text("placed_at").notNull(), // ISO 8601 instant the bet was placed
+  date: text("date").notNull(), // YYYY-MM-DD (race/card date)
+  track: text("track").notNull(),
+  race: integer("race").notNull(),
+  // WIN | PLACE | SHOW | WPS | EXA | TRI | SUPER | DD | PICK3 | PICK4 | PICK5 | OTHER
+  betType: text("bet_type").notNull(),
+  // STRAIGHT | BOX | KEY | KEYBOX | WHEEL | null
+  betSubtype: text("bet_subtype"),
+  wagerDesc: text("wager_desc").notNull(),
+  baseAmount: real("base_amount").notNull().default(0),
+  totalCost: real("total_cost").notNull(),
+  payout: real("payout").notNull().default(0),
+  result: text("result").notNull(), // WIN | LOSS | REFUND
+  source: text("source").notNull(), // xbnet | churchill-book | manual
+  createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+});
+
+export type RealBetRow = typeof realBets.$inferSelect;
+
+// Ingestion payload for POST /api/real-bets/bulk-upsert. Mirrors the book dump
+// shape (scripts/seed_real_bets.ts uses the same schema to validate the JSON).
+export const realBetInputSchema = z.object({
+  betId: z.string().min(1),
+  placedAt: z.string().min(1),
+  date: z.string().min(1),
+  track: z.string().min(1),
+  race: z.number().int(),
+  betType: z.string().min(1),
+  betSubtype: z.string().nullable().optional(),
+  wagerDesc: z.string().min(1),
+  baseAmount: z.number().default(0),
+  totalCost: z.number(),
+  payout: z.number().default(0),
+  result: z.enum(["WIN", "LOSS", "REFUND"]),
+  source: z.string().min(1),
+});
+export type RealBetInput = z.infer<typeof realBetInputSchema>;
+
+export const realBetsBulkUpsertSchema = z.object({
+  bets: z.array(realBetInputSchema).min(1),
+});
+
 // ── Card summaries (PR #41) ───────────────────────────────────────────────
 // Frozen per-card analytics roll-up, written when the card is marked complete.
 // Caches the final ROI/win-rate/ITM-rate + per-tier breakdown so completed
