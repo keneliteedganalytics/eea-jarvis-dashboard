@@ -1,8 +1,8 @@
 # V2 LOCK — Elite Edge Analytics Handicapping Pipeline
 
-**Locked**: 2026-06-12 by Kenneth Young
+**Locked**: 2026-06-12 by Kenneth Young (R2 revision adds Monte Carlo + multi-race tickets)
 **Unlock phrase**: `approve v3` (nothing else releases this lock)
-**Scope**: Brisnet + Equibase + OTB/TwinSpires last-minute drops grading, workout signal parsing, Jarvis upload, and print PDF generation.
+**Scope**: Brisnet + Equibase + OTB/TwinSpires last-minute drops grading, workout signal parsing, Jarvis upload, print PDF generation, **Monte Carlo race simulation, and multi-race exotic ticket construction**.
 
 ---
 
@@ -14,6 +14,9 @@
 | `print_card_from_jarvis.py` | `8274c987989788236dcb1b37db2395eadeecd840176a27b0ee6eaa91a3cc17fb` | CANONICAL print PDF generator (headless Chromium → Jarvis `/#/print`) |
 | `parse_workouts.py` | `e60bf1d195f853136556f1e84089705a18cc7bdcb7eba3aa14d50e2251a788b4` | Equibase workout-signal parser (BULLET/GATE/SHARP/NO_WORK) |
 | `relock_emoji_flags.py` | `23ddac85e9acd749dfdce71b8a87faec321669071cc1843e28c50c2f828be794` | Per-card flag writer — emits emoji-prefixed workout chips |
+| `monte_carlo.py` | `fb62b1adad898c1adb38fc2eee158b8bc3bf0f343c04361d61bb948a8136390f` | Per-race Monte Carlo simulator (100K sims, stress test, premortem) |
+| `multi_race_tickets.py` | `2cdc9f9f99142aeafd64e5401e1aa8eec77f8240bfab5bc9a5fe12a74e58376e` | DD/Pick-3/4/5/6 ticket builder with tier classification |
+| `monte_carlo_spec.md` | `57fb9d341835f9f0180aa318cee37f545762a5ffbdaf50f07cff1029d5bb26db` | Monte Carlo + multi-race exotic workflow spec |
 
 ---
 
@@ -58,6 +61,10 @@ TRI Key W/4 preferred. $3 base SNIPER ($36), $2 base EDGE ($24). EXA Box 3 horse
 - ❌ Switching print PDF renderer away from headless-Chromium Jarvis `/#/print`
 - ❌ Omitting OTB/TwinSpires scratch-check before upload
 - ❌ Dropping workout signals from the flags array
+- ❌ Changing Monte Carlo formula weights (top_speed 0.60 / power 0.25 / class 0.15)
+- ❌ Changing workout adjustments, pace-role thresholds, or sigma (4.0)
+- ❌ Changing multi-race ticket tier thresholds (A≥50% / B≥20% / C≥8%)
+- ❌ Skipping the Monte Carlo step before sizing any SNIPER bet ≥ $25
 
 ---
 
@@ -69,6 +76,9 @@ cd handicapping/v2-locked && sha256sum -c <<'EOF'
 8274c987989788236dcb1b37db2395eadeecd840176a27b0ee6eaa91a3cc17fb  print_card_from_jarvis.py
 e60bf1d195f853136556f1e84089705a18cc7bdcb7eba3aa14d50e2251a788b4  parse_workouts.py
 23ddac85e9acd749dfdce71b8a87faec321669071cc1843e28c50c2f828be794  relock_emoji_flags.py
+fb62b1adad898c1adb38fc2eee158b8bc3bf0f343c04361d61bb948a8136390f  monte_carlo.py
+2cdc9f9f99142aeafd64e5401e1aa8eec77f8240bfab5bc9a5fe12a74e58376e  multi_race_tickets.py
+57fb9d341835f9f0180aa318cee37f545762a5ffbdaf50f07cff1029d5bb26db  monte_carlo_spec.md
 EOF
 ```
 
