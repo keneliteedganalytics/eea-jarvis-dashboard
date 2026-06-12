@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -244,6 +244,63 @@ export type RealBetInput = z.infer<typeof realBetInputSchema>;
 
 export const realBetsBulkUpsertSchema = z.object({
   bets: z.array(realBetInputSchema).min(1),
+});
+
+// ── Expert picks (Expert Picks Comparison) ────────────────────────────────
+// Third-party handicapper selections (Racing Dudes, NYRA/Andy Serling,
+// Churchill/Kevin Kilroy) scraped per (track, date, race). Compared against the
+// EEA book/ledger results in the analytics header. (track, date, race, source)
+// is UNIQUE so a re-fetch upserts in place and stays idempotent. result/winner
+// are filled later by the reconcile endpoint once the race is official.
+export const expertPicks = sqliteTable(
+  "expert_picks",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    track: text("track").notNull(),
+    date: text("date").notNull(), // YYYY-MM-DD
+    race: integer("race").notNull(),
+    source: text("source").notNull(), // racingdudes | nyra_serling | churchill_official
+    sourceHandicapper: text("source_handicapper").notNull(),
+    topPick: integer("top_pick").notNull(), // horse program number
+    picks24: text("picks_2_4").notNull().default("[]"), // JSON array of int (2nd/3rd/4th)
+    rawText: text("raw_text").notNull().default(""),
+    fetchedAt: text("fetched_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    result: text("result"), // WIN | PLACE | SHOW | 4TH | OUT (null until reconciled)
+    winner: integer("winner"), // actual winning horse program number
+  },
+  (t) => ({
+    uniq: uniqueIndex("idx_expert_picks_unique").on(t.track, t.date, t.race, t.source),
+  }),
+);
+
+export type ExpertPickRow = typeof expertPicks.$inferSelect;
+
+// Ingestion payload — one scraped selection. picks24 is the parsed int array
+// (the fetchers/orchestrator hand back arrays; storage serializes to JSON).
+export const expertPickInputSchema = z.object({
+  track: z.string().min(1),
+  date: z.string().min(1),
+  race: z.number().int(),
+  source: z.string().min(1),
+  sourceHandicapper: z.string().min(1),
+  topPick: z.number().int(),
+  picks24: z.array(z.number().int()).default([]),
+  rawText: z.string().default(""),
+});
+export type ExpertPickInput = z.infer<typeof expertPickInputSchema>;
+
+// POST /api/expert-picks/fetch body — date + which tracks to scrape.
+export const expertPicksFetchSchema = z.object({
+  date: z.string().min(1),
+  tracks: z.array(z.string().min(1)).min(1),
+});
+
+// POST /api/expert-picks/reconcile body — official winner for one race.
+export const expertPicksReconcileSchema = z.object({
+  date: z.string().min(1),
+  track: z.string().min(1),
+  race: z.number().int(),
+  winner: z.number().int(),
 });
 
 // ── Card summaries (PR #41) ───────────────────────────────────────────────
