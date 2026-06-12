@@ -2,6 +2,7 @@ import { Link } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import type { RaceWithResult } from "@shared/schema";
 import { TierPill } from "@/components/brand/TierPill";
+import { V4TierBadge, type V4Grade } from "@/components/V4TierBadge";
 import { WeatherChip } from "@/components/WeatherChip";
 import { PickCell } from "@/components/PickCell";
 import { tierOf } from "@/lib/tiers";
@@ -43,6 +44,7 @@ export function RaceRow({
   race,
   cardId,
   readOnly = false,
+  v4Grade,
 }: {
   race: RaceWithResult;
   /**
@@ -52,6 +54,12 @@ export function RaceRow({
    */
   cardId?: number;
   readOnly?: boolean;
+  /**
+   * v4 (v4-lock-2026-06-12) grade for this race, when available. Shown as a
+   * standalone tier badge next to the v3.1 tier — v4 runs alongside, it does
+   * not replace the live tier. PASS grades (no v4 feature inputs) are hidden.
+   */
+  v4Grade?: V4Grade;
 }) {
   const cfg = tierOf(race.tier);
   const jarvis = useJarvis();
@@ -119,6 +127,13 @@ export function RaceRow({
             R{race.raceNumber}
           </div>
           <TierPill tier={race.tier} size="sm" />
+          {v4Grade && v4Grade.tier !== "PASS" && (
+            <V4TierBadge
+              tier={v4Grade.tier}
+              composite={v4Grade.composite}
+              anchorPp={v4Grade.anchorPp}
+            />
+          )}
           <div className="text-[10px] text-muted-brand tabular-nums">{race.post}</div>
           <WeatherChip weather={race.weather} />
         </RaceLink>
