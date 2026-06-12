@@ -6,6 +6,7 @@ import { ScopeLogo } from "@/components/brand/ScopeLogo";
 import { Wordmark } from "@/components/brand/Wordmark";
 import { TierPill, Pill } from "@/components/brand/TierPill";
 import { RaceRow } from "@/components/RaceRow";
+import { BiasPanel, biasStateKey, type BiasState } from "@/components/BiasPanel";
 import { useJarvis } from "@/lib/jarvis";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -119,6 +120,16 @@ export default function Home() {
     refetchInterval: REFRESH_MS,
     staleTime: 0,
   });
+  // v3.2 track-bias state for the resolved card. BiasPanel owns the SSE/poll
+  // refresh; this shared query (same key) feeds the per-race "bias applied"
+  // pill without a second network call.
+  const { data: biasState } = useQuery<BiasState>({
+    queryKey: card ? biasStateKey(card.id) : ["/api/cards", "none", "bias-state"],
+    enabled: !!card,
+    refetchInterval: REFRESH_MS,
+    staleTime: 0,
+  });
+
   const jarvis = useJarvis();
   const { toast } = useToast();
 
@@ -287,6 +298,11 @@ export default function Home() {
         </div>
       </div>
 
+      {/* v3.2 track-bias panel */}
+      <div className="mt-4">
+        <BiasPanel cardId={card.id} />
+      </div>
+
       {/* Legend */}
       <div className="mt-4">
         <div className="rounded-lg border border-gold/10 bg-navy-section p-4">
@@ -350,7 +366,7 @@ export default function Home() {
       {/* Race rows */}
       <div className="mt-4 space-y-3">
         {card.races.map((race) => (
-          <RaceRow key={race.id} race={race} cardId={card.id} />
+          <RaceRow key={race.id} race={race} cardId={card.id} biasState={biasState} />
         ))}
       </div>
     </div>

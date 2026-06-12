@@ -9,7 +9,8 @@ import { parseFlags } from "@/lib/parseFlags";
 import { useJarvis } from "@/lib/jarvis";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Play, Flag, RefreshCw, Trash2 } from "lucide-react";
+import { Play, Flag, RefreshCw, Trash2, Sparkles } from "lucide-react";
+import { biasAdjustmentSummary, type BiasState } from "@/components/BiasPanel";
 
 function ResultStrip({ race }: { race: RaceWithResult }) {
   if (!race.result) return null;
@@ -43,6 +44,7 @@ export function RaceRow({
   race,
   cardId,
   readOnly = false,
+  biasState,
 }: {
   race: RaceWithResult;
   /**
@@ -52,11 +54,21 @@ export function RaceRow({
    */
   cardId?: number;
   readOnly?: boolean;
+  /**
+   * v3.2 card-scoped bias state. When the signal is active and this race is
+   * still ungraded, a subtle "bias applied" pill is shown with the adjustments
+   * in its hover title. Reuses the card's shared bias-state query — no extra
+   * network call.
+   */
+  biasState?: BiasState | null;
 }) {
   const cfg = tierOf(race.tier);
   const jarvis = useJarvis();
   const { toast } = useToast();
   const flags = parseFlags(race.flags);
+
+  // v3.2: only ungraded races get recalibrated by an active bias signal.
+  const biasApplied = !race.result && !!biasState?.active;
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/cards/latest"] });
@@ -137,6 +149,17 @@ export function RaceRow({
                   <Flag className="h-2.5 w-2.5" /> {f}
                 </span>
               ))}
+            </div>
+          )}
+          {biasApplied && biasState && (
+            <div className="mt-1.5">
+              <span
+                className="inline-flex items-center gap-1 rounded border border-gold/30 bg-gold/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-gold-light"
+                data-testid={`bias-applied-${race.raceNumber}`}
+                title={biasAdjustmentSummary(biasState)}
+              >
+                <Sparkles className="h-2.5 w-2.5" /> v3.2 bias applied
+              </span>
             </div>
           )}
           <ResultStrip race={race} />
