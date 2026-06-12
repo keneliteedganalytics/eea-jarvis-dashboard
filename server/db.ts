@@ -162,6 +162,27 @@ CREATE TABLE IF NOT EXISTS real_bets (
 CREATE INDEX IF NOT EXISTS idx_real_bets_track ON real_bets(track);
 CREATE INDEX IF NOT EXISTS idx_real_bets_date ON real_bets(date);
 
+-- Expert picks (Expert Picks Comparison). Third-party handicapper selections
+-- scraped per (track, date, race). UNIQUE (track, date, race, source) makes a
+-- re-fetch idempotent. result/winner filled by the reconcile endpoint.
+CREATE TABLE IF NOT EXISTS expert_picks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  track TEXT NOT NULL,
+  date TEXT NOT NULL,
+  race INTEGER NOT NULL,
+  source TEXT NOT NULL,
+  source_handicapper TEXT NOT NULL,
+  top_pick INTEGER NOT NULL,
+  picks_2_4 TEXT NOT NULL DEFAULT '[]',
+  raw_text TEXT NOT NULL DEFAULT '',
+  fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  result TEXT,
+  winner INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_expert_picks_unique
+  ON expert_picks(track, date, race, source);
+CREATE INDEX IF NOT EXISTS idx_expert_picks_track_date ON expert_picks(track, date);
+
 -- Card summaries (PR #41). Frozen per-card ROI roll-up, written on completion.
 CREATE TABLE IF NOT EXISTS card_summaries (
   card_id INTEGER PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,

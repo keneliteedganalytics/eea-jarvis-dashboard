@@ -23,6 +23,7 @@ import {
   bankrollEvents,
   matticePredictions,
   realBets,
+  expertPicks,
 } from "@shared/schema";
 import type {
   Card,
@@ -68,6 +69,8 @@ import type {
   InsertMatticePrediction,
   RealBetRow,
   RealBetInput,
+  ExpertPickRow,
+  ExpertPickInput,
 } from "@shared/schema";
 import type { PedigreeSummary } from "@shared/schema";
 import { db } from "./db";
@@ -132,6 +135,20 @@ export interface IStorage {
   // Real (sportsbook) bets — Book Bets analytics
   getAllRealBets(): RealBetRow[];
   bulkUpsertRealBets(bets: RealBetInput[]): { inserted: number; updated: number };
+  getExpertPicks(filters?: {
+    track?: string;
+    date?: string;
+    source?: string;
+  }): ExpertPickRow[];
+  bulkUpsertExpertPicks(picks: ExpertPickInput[]): {
+    inserted: number;
+    updated: number;
+  };
+  updateExpertPickResult(
+    id: number,
+    result: string,
+    winner: number,
+  ): void;
 
   // Scratch + re-tier (PR #41)
   setHorseScratched(raceId: number, pgm: string, scratched: boolean): Race | undefined;
@@ -832,6 +849,81 @@ export class DatabaseStorage implements IStorage {
       else inserted++;
     }
     return { inserted, updated };
+  }
+
+  // ── Expert picks (Expert Picks Comparison) ────────────────────────────────
+  getExpertPicks(filters?: {
+    track?: string;
+    date?: string;
+    source?: string;
+  }): ExpertPickRow[] {
+    const where = [];
+    if (filters?.track) where.push(eq(expertPicks.track, filters.track));
+    if (filters?.date) where.push(eq(expertPicks.date, filters.date));
+    if (filters?.source) where.push(eq(expertPicks.source, filters.source));
+    const q = db.select().from(expertPicks);
+    const rows = where.length
+      ? q.where(and(...where)).all()
+      : q.all();
+    return rows;
+  }
+
+  // Upsert keyed on the (track, date, race, source) unique index so a re-fetch
+  // overwrites in place. Tally inserted vs updated by checking existence first.
+  bulkUpsertExpertPicks(picks: ExpertPickInput[]): {
+    inserted: number;
+    updated: number;
+  } {
+    let inserted = 0;
+    let updated = 0;
+    for (const p of picks) {
+      const existing = db
+        .select({ id: expertPicks.id })
+        .from(expertPicks)
+        .where(
+          and(
+            eq(expertPicks.track, p.track),
+            eq(expertPicks.date, p.date),
+            eq(expertPicks.race, p.race),
+            eq(expertPicks.source, p.source),
+          ),
+        )
+        .get();
+      const values = {
+        track: p.track,
+        date: p.date,
+        race: p.race,
+        source: p.source,
+        sourceHandicapper: p.sourceHandicapper,
+        topPick: p.topPick,
+        picks24: JSON.stringify(p.picks24 ?? []),
+        rawText: p.rawText ?? "",
+      };
+      db.insert(expertPicks)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [
+            expertPicks.track,
+            expertPicks.date,
+            expertPicks.race,
+            expertPicks.source,
+          ],
+          set: values,
+        })
+        .run();
+      if (existing) updated++;
+      else inserted++;
+    }
+    return { inserted, updated };
+  }
+
+  // Grade a single expert pick row after a race is official. result is one of
+  // WIN | PLACE | SHOW | 4TH | OUT; winner is the actual winning program number.
+  updateExpertPickResult(id: number, result: string, winner: number): void {
+    db.update(expertPicks)
+      .set({ result, winner })
+      .where(eq(expertPicks.id, id))
+      .run();
   }
 
   // Set hit + payout on each ledger leg for a race from its result row. Per-leg
