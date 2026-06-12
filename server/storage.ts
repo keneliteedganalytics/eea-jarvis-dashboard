@@ -22,6 +22,7 @@ import {
   cardSummaries,
   bankrollEvents,
   matticePredictions,
+  realBets,
 } from "@shared/schema";
 import type {
   Card,
@@ -65,6 +66,8 @@ import type {
   PassWinMissHorse,
   MatticePrediction,
   InsertMatticePrediction,
+  RealBetRow,
+  RealBetInput,
 } from "@shared/schema";
 import type { PedigreeSummary } from "@shared/schema";
 import { db } from "./db";
@@ -125,6 +128,10 @@ export interface IStorage {
   // Bet ledger (PR #40)
   getBetLegsByCard(cardId: number): BetLegRow[];
   getAllBetLegs(): BetLegRow[];
+
+  // Real (sportsbook) bets — Book Bets analytics
+  getAllRealBets(): RealBetRow[];
+  bulkUpsertRealBets(bets: RealBetInput[]): { inserted: number; updated: number };
 
   // Scratch + re-tier (PR #41)
   setHorseScratched(raceId: number, pgm: string, scratched: boolean): Race | undefined;
@@ -784,6 +791,47 @@ export class DatabaseStorage implements IStorage {
 
   getAllBetLegs(): BetLegRow[] {
     return db.select().from(betLegs).all();
+  }
+
+  // ── Real (sportsbook) bets — Book Bets analytics ──────────────────────────
+  getAllRealBets(): RealBetRow[] {
+    return db.select().from(realBets).orderBy(realBets.placedAt).all();
+  }
+
+  // Upsert by the book's own bet_id. Tally inserted vs updated by checking
+  // existence first — better-sqlite3 lacks a portable per-row changed-flag here.
+  bulkUpsertRealBets(bets: RealBetInput[]): { inserted: number; updated: number } {
+    let inserted = 0;
+    let updated = 0;
+    for (const b of bets) {
+      const existing = db
+        .select({ id: realBets.id })
+        .from(realBets)
+        .where(eq(realBets.betId, b.betId))
+        .get();
+      const values = {
+        betId: b.betId,
+        placedAt: b.placedAt,
+        date: b.date,
+        track: b.track,
+        race: b.race,
+        betType: b.betType,
+        betSubtype: b.betSubtype ?? null,
+        wagerDesc: b.wagerDesc,
+        baseAmount: b.baseAmount ?? 0,
+        totalCost: b.totalCost,
+        payout: b.payout ?? 0,
+        result: b.result,
+        source: b.source,
+      };
+      db.insert(realBets)
+        .values(values)
+        .onConflictDoUpdate({ target: realBets.betId, set: values })
+        .run();
+      if (existing) updated++;
+      else inserted++;
+    }
+    return { inserted, updated };
   }
 
   // Set hit + payout on each ledger leg for a race from its result row. Per-leg

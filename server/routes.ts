@@ -29,6 +29,14 @@ import {
   type Timeframe,
 } from "./analytics";
 import {
+  buildBookSummary,
+  buildBookByTrack,
+  buildBookByBetType,
+  buildBookByTrackAndType,
+  buildBookBankrollCurve,
+  buildBookBets,
+} from "./book-analytics";
+import {
   cardBriefingScript,
   raceBriefingScript,
   raceRecapScript,
@@ -66,6 +74,7 @@ import {
   DEFAULT_METHODOLOGY_VERSION,
 } from "./services/backtest";
 import { snapshotSubmitSchema, outcomesSubmitSchema } from "@shared/schema";
+import { realBetsBulkUpsertSchema } from "@shared/schema";
 
 // Body schema for POST /api/cards/on-demand-ingest. Track is fuzzy-resolved
 // server-side; date is validated there too (this only enforces presence/shape).
@@ -920,6 +929,60 @@ export async function registerRoutes(
   // Distinct list of tracks with graded race counts, for the Per-Track picker.
   app.get("/api/analytics/tracks", (_req, res) => {
     res.json(buildAnalyticsTracks());
+  });
+
+  // ── Book Bets (real sportsbook bets) ───────────────────────────────────────
+  // Analytics over the real_bets table — Ken's ACTUAL placed bets (XBNet +
+  // Churchill book dump), independent of the Jarvis bet_legs ledger. All GETs
+  // accept optional &from=YYYY-MM-DD&to=YYYY-MM-DD date-range filtering.
+  function bookScope(req: Request): { from?: string; to?: string } {
+    return {
+      from: typeof req.query.from === "string" ? req.query.from : undefined,
+      to: typeof req.query.to === "string" ? req.query.to : undefined,
+    };
+  }
+
+  app.get("/api/analytics/book/summary", (req, res) => {
+    res.json(buildBookSummary(bookScope(req)));
+  });
+  app.get("/api/analytics/book/by-track", (req, res) => {
+    res.json(buildBookByTrack(bookScope(req)));
+  });
+  app.get("/api/analytics/book/by-bet-type", (req, res) => {
+    res.json(buildBookByBetType(bookScope(req)));
+  });
+  app.get("/api/analytics/book/by-track-and-type", (req, res) => {
+    res.json(buildBookByTrackAndType(bookScope(req)));
+  });
+  app.get("/api/analytics/book/bankroll-curve", (req, res) => {
+    res.json(buildBookBankrollCurve(bookScope(req)));
+  });
+  app.get("/api/analytics/book/bets", (req, res) => {
+    const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
+    const offset = req.query.offset != null ? Number(req.query.offset) : undefined;
+    res.json(
+      buildBookBets({
+        ...bookScope(req),
+        track: typeof req.query.track === "string" ? req.query.track : undefined,
+        betType: typeof req.query.betType === "string" ? req.query.betType : undefined,
+        result: typeof req.query.result === "string" ? req.query.result : undefined,
+        date: typeof req.query.date === "string" ? req.query.date : undefined,
+        limit: Number.isFinite(limit) ? limit : undefined,
+        offset: Number.isFinite(offset) ? offset : undefined,
+      }),
+    );
+  });
+
+  // Bulk upsert of real bets by bet_id. Admin-gated via the global adminPinGate
+  // (x-admin-pin) since this is a POST. Idempotent — used by the book-dump
+  // ingestion pipeline. Returns { inserted, updated }.
+  app.post("/api/real-bets/bulk-upsert", (req, res) => {
+    const parsed = realBetsBulkUpsertSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "invalid body", details: parsed.error.flatten() });
+    }
+    const result = storage.bulkUpsertRealBets(parsed.data.bets);
+    res.json(result);
   });
 
   // ── Mattice overlay (PR #51) ───────────────────────────────────────────────

@@ -139,6 +139,29 @@ CREATE TABLE IF NOT EXISTS bankroll_events (
 );
 CREATE INDEX IF NOT EXISTS idx_bankroll_cardId ON bankroll_events(card_id);
 
+-- Real (sportsbook) bets — Book Bets analytics. Ken's ACTUAL placed bets
+-- (XBNet + Churchill book dump), independent of the Jarvis bet_legs ledger.
+-- bet_id is the book's own identifier and is UNIQUE so a re-ingest upserts.
+CREATE TABLE IF NOT EXISTS real_bets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  bet_id TEXT NOT NULL UNIQUE,
+  placed_at TEXT NOT NULL,
+  date TEXT NOT NULL,
+  track TEXT NOT NULL,
+  race INTEGER NOT NULL,
+  bet_type TEXT NOT NULL,
+  bet_subtype TEXT,
+  wager_desc TEXT NOT NULL,
+  base_amount REAL NOT NULL DEFAULT 0,
+  total_cost REAL NOT NULL,
+  payout REAL NOT NULL DEFAULT 0,
+  result TEXT NOT NULL,
+  source TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS idx_real_bets_track ON real_bets(track);
+CREATE INDEX IF NOT EXISTS idx_real_bets_date ON real_bets(date);
+
 -- Card summaries (PR #41). Frozen per-card ROI roll-up, written on completion.
 CREATE TABLE IF NOT EXISTS card_summaries (
   card_id INTEGER PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
