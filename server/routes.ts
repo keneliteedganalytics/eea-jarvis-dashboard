@@ -36,6 +36,7 @@ import {
   buildBookBankrollCurve,
   buildBookBets,
 } from "./book-analytics";
+import { registerExpertPicksRoutes } from "./expert-picks";
 import {
   cardBriefingScript,
   raceBriefingScript,
@@ -984,6 +985,10 @@ export async function registerRoutes(
     const result = storage.bulkUpsertRealBets(parsed.data.bets);
     res.json(result);
   });
+
+  // Expert Picks Comparison (ingestion + reconcile + read + comparison). The
+  // two POSTs inherit the global adminPinGate registered above.
+  registerExpertPicksRoutes(app);
 
   // ── Mattice overlay (PR #51) ───────────────────────────────────────────────
   // Running roll-up + current weight phase for the dashboard tile. Read-only;
