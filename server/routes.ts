@@ -45,6 +45,10 @@ import {
 } from "./services/scripts";
 import { generateSpeech, getCachedFilePath, fetchVoices } from "./services/tts";
 import { addSseClient, removeSseClient, broadcastEvent } from "./services/events";
+import {
+  getBiasStateForCard,
+  recalibrateFromBias,
+} from "./services/bias_service";
 import { startPoller, runPollerNow } from "./services/poller";
 import { voiceRouter } from "./routes/voice";
 import { showApiRouter, showFileRouter } from "./routes/show";
@@ -377,7 +381,45 @@ export async function registerRoutes(
         if (v !== undefined) (opts as Record<string, number | null>)[k] = v;
       }
       const result = storage.logResult(raceId, finishOrder, opts);
-      res.status(201).json(result);
+
+      // v3.2: auto-trigger track-bias recalibration for the card.
+      // Updates whyText on remaining ungraded races + broadcasts a card_updated
+      // event so the dashboard live-refreshes. Failures here MUST NOT block
+      // the result POST (best-effort).
+      let biasAutoRecal:
+        | {
+            active: boolean;
+            confidence: number;
+            hotPps: string[];
+            annotatedRaceIds: number[];
+          }
+        | undefined;
+      try {
+        const card = storage.getCard(race.cardId);
+        if (card) {
+          const out = recalibrateFromBias(race.cardId);
+          biasAutoRecal = {
+            active: out.biasState.active,
+            confidence: out.biasState.confidence,
+            hotPps: out.biasState.hotPps,
+            annotatedRaceIds: out.annotations.map((a) => a.raceId),
+          };
+          if (out.biasState.active && out.annotations.length > 0) {
+            broadcastEvent("card_updated", {
+              cardId: race.cardId,
+              source: "v3.2-bias-recalibrate",
+            });
+            broadcastEvent("bias_updated", {
+              cardId: race.cardId,
+              biasState: out.biasState,
+            });
+          }
+        }
+      } catch (biasErr) {
+        console.error("[v3.2] bias auto-recal failed (non-fatal):", biasErr);
+      }
+
+      res.status(201).json({ ...result, biasAutoRecal });
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });
     }
@@ -835,7 +877,42 @@ export async function registerRoutes(
     }
   });
 
-  // ── EEA: Track bias ───────────────────────────────────────────────────────
+  // ── v3.2: Card-scoped track bias (live PP + style detector) ───────────────
+  app.get("/api/cards/:id/bias-state", (req, res) => {
+    const id = Number(req.params.id);
+    const card = storage.getCard(id);
+    if (!card) return res.status(404).json({ error: "Card not found" });
+    try {
+      const state = getBiasStateForCard(id);
+      res.json({ cardId: id, ...state });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  app.post("/api/cards/:id/recalibrate-from-bias", (req, res) => {
+    const id = Number(req.params.id);
+    const card = storage.getCard(id);
+    if (!card) return res.status(404).json({ error: "Card not found" });
+    try {
+      const out = recalibrateFromBias(id);
+      if (out.biasState.active) {
+        broadcastEvent("card_updated", {
+          cardId: id,
+          source: "v3.2-bias-recalibrate-manual",
+        });
+        broadcastEvent("bias_updated", {
+          cardId: id,
+          biasState: out.biasState,
+        });
+      }
+      res.json({ cardId: id, ...out });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  // ── EEA: Track bias (external source — distinct from v3.2 card-scoped above)
   app.get("/api/bias/today", async (req, res) => {
     const track = String(req.query.track || storage.getSettings().defaultTrack);
     const date = String(req.query.date || new Date().toISOString().slice(0, 10));
