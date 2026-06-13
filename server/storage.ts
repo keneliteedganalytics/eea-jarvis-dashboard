@@ -569,7 +569,11 @@ export class DatabaseStorage implements IStorage {
     const patch: Partial<Race> = {};
     if (whyText !== undefined) patch.whyText = whyText;
     if (paceText !== undefined) patch.paceText = paceText;
-    db.update(races).set(patch).where(eq(races.id, id)).run();
+    // Drizzle throws on an empty .set(); skip the no-op (e.g. an
+    // annotations-only PATCH that carries neither whyText nor paceText).
+    if (Object.keys(patch).length > 0) {
+      db.update(races).set(patch).where(eq(races.id, id)).run();
+    }
     return this.getRace(id);
   }
 
@@ -577,6 +581,23 @@ export class DatabaseStorage implements IStorage {
   // JSON.stringify; mirrors updateRaceText's direct-column write.
   updateRaceFlags(id: number, flagsJson: string): Race | undefined {
     db.update(races).set({ flags: flagsJson }).where(eq(races.id, id)).run();
+    return this.getRace(id);
+  }
+
+  // Patch per-horse workout annotation columns. Each arg, when provided, is the
+  // pre-serialized JSON string (or null to clear). Undefined leaves the column
+  // untouched — mirrors updateRaceText's direct-column write.
+  updateRaceAnnotations(
+    id: number,
+    horseAnnotations?: string | null,
+    horseWorkoutText?: string | null,
+  ): Race | undefined {
+    const patch: Partial<Race> = {};
+    if (horseAnnotations !== undefined) patch.horseAnnotations = horseAnnotations;
+    if (horseWorkoutText !== undefined) patch.horseWorkoutText = horseWorkoutText;
+    if (Object.keys(patch).length > 0) {
+      db.update(races).set(patch).where(eq(races.id, id)).run();
+    }
     return this.getRace(id);
   }
 

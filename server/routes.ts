@@ -11,6 +11,9 @@ import {
   updateRacePicksSchema,
   insertSettingsSchema,
   updatePredictionSchema,
+  sanitizeHorseAnnotations,
+  sanitizeHorseWorkoutText,
+  filterWorkoutFlags,
 } from "@shared/schema";
 import type { Card, Settings, Result } from "@shared/schema";
 import { z } from "zod";
@@ -97,6 +100,33 @@ function ttsSettings(): { voiceId: string; modelId: string; speed: number } {
     modelId: s.elevenlabsModelId,
     speed: s.voiceSpeed,
   };
+}
+
+// Tolerant parse of a flags value (JSON string-array, plain array, or null)
+// into a string[]. Never throws.
+function parseStringArray(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map(String);
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {
+    /* fall through */
+  }
+  return raw.split(/\s*[|,]\s*/).filter(Boolean);
+}
+
+// Accept either an already-serialized JSON string or a plain object/array and
+// return the parsed value (or the value as-is). Used for race annotation inputs
+// that the build script may send as objects.
+function parseMaybeJson(raw: unknown): unknown {
+  if (typeof raw !== "string") return raw;
+  if (!raw.trim()) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 export async function registerRoutes(
@@ -197,9 +227,22 @@ export async function registerRoutes(
   // snapshot?: SnapshotSubmit }. When `snapshot` is present we also archive a
   // backtest snapshot in the same request, so every new card is captured at
   // score time without a second call.
+  // Each race entry may carry horseAnnotations/horseWorkoutText as either an
+  // already-serialized JSON string (the column type) or a plain object — the
+  // build script sends objects. They're normalized below before insert.
+  const annotationsInput = z.union([z.string(), z.record(z.unknown())]).nullable().optional();
   const createCardSchema = z.object({
     card: insertCardSchema,
-    races: z.array(insertRaceSchema.omit({ cardId: true })).default([]),
+    races: z
+      .array(
+        insertRaceSchema
+          .omit({ cardId: true })
+          .extend({
+            horseAnnotations: annotationsInput,
+            horseWorkoutText: annotationsInput,
+          }),
+      )
+      .default([]),
     snapshot: snapshotSubmitSchema.optional(),
   });
   app.post("/api/cards", (req, res) => {
@@ -207,7 +250,22 @@ export async function registerRoutes(
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.flatten() });
     }
-    const created = storage.createCard(parsed.data.card, parsed.data.races);
+    // Normalize each race: sanitize workout annotations to clean JSON strings,
+    // and run flags through the workout-aware allowlist so BULLET_HORSES:/etc.
+    // summary entries survive instead of being stripped.
+    const races = parsed.data.races.map((r) => {
+      const flags = parseStringArray(r.flags);
+      const allowed = new Set(flags); // base allowlist = whatever was supplied
+      const cleanAnnotations = sanitizeHorseAnnotations(parseMaybeJson(r.horseAnnotations));
+      const cleanWorkoutText = sanitizeHorseWorkoutText(parseMaybeJson(r.horseWorkoutText));
+      return {
+        ...r,
+        flags: JSON.stringify(filterWorkoutFlags(flags, allowed)),
+        horseAnnotations: cleanAnnotations ? JSON.stringify(cleanAnnotations) : null,
+        horseWorkoutText: cleanWorkoutText ? JSON.stringify(cleanWorkoutText) : null,
+      };
+    });
+    const created = storage.createCard(parsed.data.card, races);
     if (parsed.data.snapshot) {
       upsertSnapshot(created.id, parsed.data.snapshot);
     }
@@ -492,19 +550,33 @@ export async function registerRoutes(
     }
   });
 
-  // Update editable analysis text on a race.
+  // Update editable analysis text + per-horse workout annotations on a race.
+  // whyText/paceText keep their existing behavior. horseAnnotations and
+  // horseWorkoutText are sanitized (unknown tags dropped, never 400'd) and
+  // persisted as JSON; pass null to clear, omit to leave untouched.
   app.patch("/api/races/:id", (req, res) => {
     const raceId = Number(req.params.id);
     const parsed = updateRaceTextSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.flatten() });
     }
-    const updated = storage.updateRaceText(
-      raceId,
-      parsed.data.whyText,
-      parsed.data.paceText,
-    );
-    if (!updated) return res.status(404).json({ error: "Race not found" });
+    const race = storage.getRace(raceId);
+    if (!race) return res.status(404).json({ error: "Race not found" });
+
+    storage.updateRaceText(raceId, parsed.data.whyText, parsed.data.paceText);
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    let annotations: string | null | undefined;
+    let workoutText: string | null | undefined;
+    if ("horseAnnotations" in body) {
+      const clean = sanitizeHorseAnnotations(body.horseAnnotations);
+      annotations = clean ? JSON.stringify(clean) : null;
+    }
+    if ("horseWorkoutText" in body) {
+      const clean = sanitizeHorseWorkoutText(body.horseWorkoutText);
+      workoutText = clean ? JSON.stringify(clean) : null;
+    }
+    const updated = storage.updateRaceAnnotations(raceId, annotations, workoutText);
     res.json(updated);
   });
 

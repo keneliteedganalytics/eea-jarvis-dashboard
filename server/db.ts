@@ -74,7 +74,9 @@ CREATE TABLE IF NOT EXISTS races (
   fourth_pgm TEXT, fourth_name TEXT, fourth_score REAL,
   why_text TEXT,
   pace_text TEXT,
-  tier_demoted_by TEXT
+  tier_demoted_by TEXT,
+  horse_annotations TEXT,
+  horse_workout_text TEXT
 );
 
 CREATE TABLE IF NOT EXISTS results (
@@ -671,6 +673,15 @@ if (!racesCols.has("mattice_confirmed")) {
 // Wet-track overlay: per-race inferred/overridden track condition (nullable).
 if (!racesCols.has("track_condition")) {
   sqlite.exec("ALTER TABLE races ADD COLUMN track_condition TEXT");
+}
+// Horse-level workout annotations (migration 0026). Two nullable JSON columns:
+// horse_annotations Record<pgm,string[]> of {BULLET,GATE,SHARP,NO_WORK} tags,
+// horse_workout_text Record<pgm,string> of raw workout lines.
+if (!racesCols.has("horse_annotations")) {
+  sqlite.exec("ALTER TABLE races ADD COLUMN horse_annotations TEXT");
+}
+if (!racesCols.has("horse_workout_text")) {
+  sqlite.exec("ALTER TABLE races ADD COLUMN horse_workout_text TEXT");
 }
 
 // Idempotent bet_legs-column migration for PR #41: refund flag + timestamp set

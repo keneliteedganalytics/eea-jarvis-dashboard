@@ -3,7 +3,20 @@ import { useQuery, useQueries } from "@tanstack/react-query";
 import { useRoute } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { parseFlags } from "@/lib/parseFlags";
+import { parseHorseAnnotations, type WorkoutTag } from "@shared/schema";
 import "../print.css";
+
+// Plain-glyph rendering for print (no dark-theme tokens on white paper).
+const WORKOUT_GLYPH: Record<WorkoutTag, string> = {
+  BULLET: "🔥",
+  GATE: "⏱️",
+  SHARP: "⚡",
+  NO_WORK: "📉",
+};
+function workoutGlyphs(tags: WorkoutTag[] | undefined): string {
+  if (!tags || tags.length === 0) return "";
+  return tags.map((t) => WORKOUT_GLYPH[t]).filter(Boolean).join("");
+}
 
 // ── Types for the /print payload ─────────────────────────────────────────
 interface BetLeg {
@@ -41,6 +54,8 @@ interface PrintRace {
   fourthScore: number | null;
   bets: RaceBets;
   summary: string | null;
+  horseAnnotations: string | null;
+  horseWorkoutText: string | null;
 }
 interface PrintCard {
   id: number;
@@ -63,18 +78,24 @@ function PickRow({
   pgm,
   name,
   score,
+  tags,
 }: {
   rank: number;
   pgm: string | null;
   name: string | null;
   score: number | null;
+  tags?: WorkoutTag[];
 }) {
   if (!pgm) return null;
+  const glyphs = workoutGlyphs(tags);
   return (
     <tr>
       <td className="col-num">{rank}</td>
       <td className="col-pgm">#{pgm}</td>
-      <td>{name ?? "—"}</td>
+      <td>
+        {name ?? "—"}
+        {glyphs && <span className="workout-glyphs"> {glyphs}</span>}
+      </td>
       <td className="col-rating">{score != null ? score.toFixed(1) : "—"}</td>
     </tr>
   );
@@ -91,6 +112,24 @@ function RaceBlock({
 }) {
   const flags = parseFlags(race.flags);
   const tier = race.tier.toUpperCase();
+  const annotations = parseHorseAnnotations(race.horseAnnotations);
+  const tagsFor = (pgm: string | null): WorkoutTag[] | undefined =>
+    pgm ? annotations[String(pgm)] : undefined;
+  // Append a tagged horse's glyph immediately after its program number in a bet
+  // structure string (e.g. "$40 EXA 3-6" → "$40 EXA 3🔥-6"). Matches a pgm
+  // token bounded by a non-digit so "13" isn't matched by "3".
+  const annotateStructure = (structure: string): string => {
+    let out = structure;
+    for (const [pgm, tags] of Object.entries(annotations)) {
+      const g = workoutGlyphs(tags);
+      if (!g) continue;
+      out = out.replace(
+        new RegExp(`(^|[^0-9])(${pgm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?![0-9])`, "g"),
+        `$1$2${g}`,
+      );
+    }
+    return out;
+  };
   return (
     <div className="print-race">
       <div className="print-race-head">
@@ -112,10 +151,10 @@ function RaceBlock({
           </tr>
         </thead>
         <tbody>
-          <PickRow rank={1} pgm={race.winPgm} name={race.winName} score={race.winScore} />
-          <PickRow rank={2} pgm={race.placePgm} name={race.placeName} score={race.placeScore} />
-          <PickRow rank={3} pgm={race.showPgm} name={race.showName} score={race.showScore} />
-          <PickRow rank={4} pgm={race.fourthPgm} name={race.fourthName} score={race.fourthScore} />
+          <PickRow rank={1} pgm={race.winPgm} name={race.winName} score={race.winScore} tags={tagsFor(race.winPgm)} />
+          <PickRow rank={2} pgm={race.placePgm} name={race.placeName} score={race.placeScore} tags={tagsFor(race.placePgm)} />
+          <PickRow rank={3} pgm={race.showPgm} name={race.showName} score={race.showScore} tags={tagsFor(race.showPgm)} />
+          <PickRow rank={4} pgm={race.fourthPgm} name={race.fourthName} score={race.fourthScore} tags={tagsFor(race.fourthPgm)} />
         </tbody>
       </table>
 
@@ -132,7 +171,7 @@ function RaceBlock({
           <ul>
             {race.bets.legs.map((leg, i) => (
               <li key={i}>
-                <span>{leg.structure}</span>
+                <span>{annotateStructure(leg.structure)}</span>
                 <span>{money(leg.cost)}</span>
               </li>
             ))}
@@ -254,7 +293,7 @@ export default function Print() {
           </div>
           <div className="workout-key">
             <span className="label">Workout Signals</span>
-            🔥 Bullet workout · ⏱️ Gate work · 📉 No workout edge
+            🔥 Bullet workout · ⏱️ Gate work · ⚡ Sharp work · 📉 No workout edge
           </div>
         </div>
 
