@@ -1,10 +1,12 @@
 import { useParams, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import type { CardWithRaces, RaceWithResult } from "@shared/schema";
+import type { CardWithRaces, RaceWithResult, WorkoutTag } from "@shared/schema";
+import { parseHorseAnnotations } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { TierPill } from "@/components/brand/TierPill";
 import { PedigreeChip } from "@/components/PedigreeChip";
+import { WorkoutBadges, workoutGlyph } from "@/components/WorkoutBadges";
 import { ScopeLogo } from "@/components/brand/ScopeLogo";
 import { useJarvis } from "@/lib/jarvis";
 import { tierOf } from "@/lib/tiers";
@@ -123,6 +125,10 @@ function PickEditor({ race, locked }: { race: RaceWithResult; locked: boolean })
     { slot: "4TH", pgm: race.fourthPgm, name: race.fourthName, score: race.fourthScore, hit: race.result?.fourthHit },
   ];
 
+  const annotations = parseHorseAnnotations(race.horseAnnotations);
+  const tagsFor = (pgm: string | null): WorkoutTag[] | undefined =>
+    pgm ? annotations[String(pgm)] : undefined;
+
   return (
     <div className="space-y-3">
       {picks.map((p) => {
@@ -142,6 +148,9 @@ function PickEditor({ race, locked }: { race: RaceWithResult; locked: boolean })
               <span className="self-center">
                 <PedigreeChip pedigree={race.pedigree?.[p.pgm]} />
               </span>
+            )}
+            {p.pgm && !isScratched && (
+              <WorkoutBadges tags={tagsFor(p.pgm)} className="self-center" />
             )}
             <span className="ml-auto text-gold font-display font-bold tabular-nums">{p.score?.toFixed(1)}</span>
           </div>
@@ -271,6 +280,22 @@ export default function RaceDetail() {
   const order = race.result ? (JSON.parse(race.result.finishOrder) as string[]) : null;
   const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
+  // Subtle workout glyph after a tagged horse's program number in a wager
+  // structure string (e.g. "$40 EXA 3-6" → "$40 EXA 3🔥-6").
+  const betAnnotations = parseHorseAnnotations(race.horseAnnotations);
+  const annotateStructure = (structure: string): string => {
+    let out = structure;
+    for (const [pgm, tags] of Object.entries(betAnnotations)) {
+      const g = workoutGlyph(tags);
+      if (!g) continue;
+      out = out.replace(
+        new RegExp(`(^|[^0-9])(${pgm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?![0-9])`, "g"),
+        `$1$2${g}`,
+      );
+    }
+    return out;
+  };
+
   return (
     <div className="p-4 sm:p-6 max-w-[1400px] mx-auto pb-28">
       <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-gold hover:text-gold-light" data-testid="link-back"><ArrowLeft className="h-4 w-4" /> Back to card</Link>
@@ -348,7 +373,7 @@ export default function RaceDetail() {
                 bets.legs.map((leg, i) => (
                   <div key={i} className="flex items-start gap-2 text-xs" data-testid={`wager-${i}`}>
                     <span className="shrink-0 rounded bg-gold/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gold font-display font-bold">{leg.type}</span>
-                    <span className="text-silver tabular-nums flex-1">{leg.structure}</span>
+                    <span className="text-silver tabular-nums flex-1">{annotateStructure(leg.structure)}</span>
                     <span className="text-silver tabular-nums shrink-0">{money(leg.cost)}</span>
                   </div>
                 ))

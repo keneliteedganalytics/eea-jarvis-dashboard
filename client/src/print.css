@@ -121,6 +121,11 @@
   font-variant-numeric: tabular-nums lining-nums;
   white-space: nowrap;
 }
+.print-picks .workout-glyphs {
+  font-size: 8.5pt;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
 
 .print-bets {
   font-size: 9pt;

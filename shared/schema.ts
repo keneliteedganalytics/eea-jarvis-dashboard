@@ -61,6 +61,13 @@ export const races = sqliteTable("races", {
   whyText: text("why_text"),
   paceText: text("pace_text"),
 
+  // Per-horse workout annotations. JSON object keyed by program number, each
+  // value an array of tags from {BULLET, GATE, SHARP, NO_WORK}. Nullable —
+  // older cards have none. Companion horseWorkoutText holds the raw workout
+  // line per pgm so the print view can show the actual workout if wanted.
+  horseAnnotations: text("horse_annotations"), // JSON: Record<pgm, string[]> | null
+  horseWorkoutText: text("horse_workout_text"), // JSON: Record<pgm, string> | null
+
   // Explainability for the flag-driven tier demotion (postmortem Fix 2). Holds a
   // note like "EDGE→RECON: BOUNCE RISK on #1 (place pick)" when a flag on the
   // win/place pick dropped the tier; null when no demotion occurred.
@@ -912,6 +919,68 @@ export const payoutsSubmitSchema = z.object({
   superfectaPayout: payoutNum,
 });
 
+// ── Horse-level workout annotations ───────────────────────────────────────
+// Per-horse workout tags rendered next to each pgm on the dashboard + print
+// card. Unknown tags are dropped on write (filtered, not rejected). The
+// race-level `flags` allowlist also preserves BULLET_HORSES:/GATE_HORSES:/
+// SHARP_HORSES:/NO_WORK_HORSES: summary entries (see WORKOUT_FLAG_PREFIXES).
+export const WORKOUT_TAGS = ["BULLET", "GATE", "SHARP", "NO_WORK"] as const;
+export type WorkoutTag = (typeof WORKOUT_TAGS)[number];
+
+// Race-level flag prefixes that carry per-race workout summaries (csv of pgms).
+// Any flag string starting with one of these is preserved by the allowlist.
+export const WORKOUT_FLAG_PREFIXES = [
+  "BULLET_HORSES:",
+  "GATE_HORSES:",
+  "SHARP_HORSES:",
+  "NO_WORK_HORSES:",
+] as const;
+
+const WORKOUT_TAG_SET = new Set<string>(WORKOUT_TAGS);
+
+// Coerce arbitrary input into a clean Record<pgm, WorkoutTag[]>: keep only
+// object inputs, string pgm keys, array values, and tag strings in the enum.
+// Returns null for null/non-object input so the column can be cleared.
+export function sanitizeHorseAnnotations(
+  input: unknown,
+): Record<string, WorkoutTag[]> | null {
+  if (input == null) return null;
+  if (typeof input !== "object" || Array.isArray(input)) return null;
+  const out: Record<string, WorkoutTag[]> = {};
+  for (const [pgm, val] of Object.entries(input as Record<string, unknown>)) {
+    if (!Array.isArray(val)) continue;
+    const tags = val.filter(
+      (t): t is WorkoutTag => typeof t === "string" && WORKOUT_TAG_SET.has(t),
+    );
+    out[pgm] = tags;
+  }
+  return out;
+}
+
+// Coerce input into Record<pgm, string> (raw workout lines). Drops non-string
+// values; returns null for null/non-object input.
+export function sanitizeHorseWorkoutText(
+  input: unknown,
+): Record<string, string> | null {
+  if (input == null) return null;
+  if (typeof input !== "object" || Array.isArray(input)) return null;
+  const out: Record<string, string> = {};
+  for (const [pgm, val] of Object.entries(input as Record<string, unknown>)) {
+    if (typeof val === "string") out[pgm] = val;
+  }
+  return out;
+}
+
+// Keep only allowlisted flags: the existing flag set plus any string starting
+// with a workout-summary prefix. `allowed` is the caller's base allowlist.
+export function filterWorkoutFlags(flags: string[], allowed: Set<string>): string[] {
+  return flags.filter(
+    (f) =>
+      allowed.has(f) ||
+      WORKOUT_FLAG_PREFIXES.some((p) => f.startsWith(p)),
+  );
+}
+
 // Update race analysis text
 export const updateRaceTextSchema = z.object({
   whyText: z.string().optional(),
@@ -1029,6 +1098,27 @@ export type RaceWithResult = Race & {
   // Re-tier history (PR #41): SCRATCH events for this race, newest first.
   events?: RaceEventRow[];
 };
+
+// Parse the stored horse_annotations JSON column into a clean tag map. Tolerant
+// of null/malformed JSON (returns {}). Used by the UI + print view.
+export function parseHorseAnnotations(raw: string | null | undefined): Record<string, WorkoutTag[]> {
+  if (!raw) return {};
+  try {
+    return sanitizeHorseAnnotations(JSON.parse(raw)) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+// Parse the stored horse_workout_text JSON column into a pgm→line map.
+export function parseHorseWorkoutText(raw: string | null | undefined): Record<string, string> {
+  if (!raw) return {};
+  try {
+    return sanitizeHorseWorkoutText(JSON.parse(raw)) ?? {};
+  } catch {
+    return {};
+  }
+}
 export type CardWithRaces = Card & { races: RaceWithResult[] };
 
 // ── Historical archive ────────────────────────────────────────────────────
